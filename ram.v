@@ -1,24 +1,19 @@
-// W65C832 FPGA Soft Processor
-//  Author: Michael Kohn
-//   Email: mike@mikekohn.net
-//     Web: https://www.mikekohn.net/
-//   Board: iceFUN iCE40 HX8K
-// License: MIT
+// GD24032 basato su W65C832 FPGA Soft Processor di Michael Kohn
+//   Board: Cyclone EP4CE6E22 
 //
-// Copyright 2024 by Michael Kohn
-// Adapted by GD on 30/6/96 for Cyclone EPC4CE6E22
+// GD 07/2026  superguerra & scisma daiiiiiii
 
-// This creates 4096 bytes of RAM on the FPGA itself which begins at 0x0000.
+// This creates 16384 bytes of RAM on the FPGA itself which begins at 0x00100000.
 
 module ram(
   input  [11:0] address,
-  input  [7:0] data_in,
-  output reg [7:0] data_out,
+  input  [31:0] data_in,
+  output reg [31:0] data_out,
   input write_enable,
   input clk
 );
 
-reg [7:0] memory [4095:0];
+reg [31:0] memory [4095:0];
 
 always @(posedge clk) begin
   if (write_enable) begin

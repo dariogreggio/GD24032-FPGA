@@ -81,6 +81,7 @@ wire [3:0] Ts;
 wire [4:0] Rd;
 wire [3:0] Td;
 wire [1:0] Sz;
+wire Cond;
 wire Ff;
 wire [6:0] Opcode;
 assign Mm  = instruction[2:0];
@@ -88,6 +89,7 @@ assign Rs = instruction[7:3];
 assign Ts = instruction[11:8];
 assign Rd = instruction[16:12];
 assign Td = instruction[20:17];
+assign Cond = instruction[21];
 assign Sz = instruction[23:22];
 assign Ff = instruction[24];
 assign Opcode = instruction[31:25];
@@ -126,31 +128,58 @@ reg do_branch;
 reg [31:0] branch_offset;
 
 // Flags.
-parameter FLAG_N   = 7;
-parameter FLAG_V   = 6;
-parameter FLAG_B   = 4;
-parameter FLAG_D   = 3;
-parameter FLAG_I   = 2;
-parameter FLAG_Z   = 1;
-parameter FLAG_C   = 0;
+parameter FLAG_ADDR64 = 15;
+parameter FLAG_ENFALIGN = 14;
+parameter FLAG_REMAPR = 13;
+parameter FLAG_TRAP = 12;
+parameter FLAG_IOPL = 11;
+parameter FLAG_PRIV = 10;
+parameter FLAG_NT   = 9;
+parameter FLAG_X   = 8;
+parameter FLAG_D   = 7;
+parameter FLAG_AS   = 6;
+parameter FLAG_OV   = 5;
+parameter FLAG_P   = 4;
+parameter FLAG_HC   = 3;
+parameter FLAG_C   = 2;
+parameter FLAG_S   = 1;
+parameter FLAG_Z   = 0;
 
 reg [31:0] flags;
 
-wire flag_n;
-wire flag_v;
-wire flag_b;
+wire flag_addr64;
+wire flag_enfalign;
+wire flag_remapr;
+wire flag_trap;
+wire flag_iopl;
+wire flag_priv;
+wire flag_nt;
+wire flag_x;
 wire flag_d;
-wire flag_i;
-wire flag_z;
+wire flag_as;
+wire flag_ov;
+wire flag_p;
+wire flag_hc;
 wire flag_c;
+wire flag_s;
+wire flag_z;
 
-assign flag_n   = flags[FLAG_N];
-assign flag_v   = flags[FLAG_V];
-assign flag_b   = flags[FLAG_B];
+assign flag_addr64 = flags[FLAG_ADDR64];
+assign flag_enfalign = flags[FLAG_ENFALIGN];
+assign flag_remapr = flags[FLAG_REMAPR];
+assign flag_trap = flags[FLAG_TRAP];
+assign flag_iopl = flags[FLAG_IOPL];
+assign flag_priv = flags[FLAG_PRIV];
+assign flag_nt   = flags[FLAG_X];
+assign flag_x   = flags[FLAG_X];
 assign flag_d   = flags[FLAG_D];
-assign flag_i   = flags[FLAG_I];
-assign flag_z   = flags[FLAG_Z];
+assign flag_as   = flags[FLAG_AS];
+assign flag_ov  = flags[FLAG_OV];
+assign flag_p   = flags[FLAG_P];
+assign flag_hc  = flags[FLAG_HC];
 assign flag_c   = flags[FLAG_C];
+assign flag_s   = flags[FLAG_S];
+assign flag_z   = flags[FLAG_Z];
 
 // Debug.
 //reg [7:0] debug_0 = 0;
@@ -225,99 +254,80 @@ parameter STATE_HALTED            = 63;
 parameter STATE_IRQ_0	          = 64;
 parameter STATE_IRQ_1	          = 65;
 
-// Instruction format: aaabbbcc
+// Instruction format: 
 
-// c = 00 aaa = op, bbb = mode
-parameter OP_BIT     = 3'b001;
-parameter OP_JMP     = 3'b010; // jmp ADDRESS
-parameter OP_JMP_IND = 3'b011; // jmp (ADDRESS)
-parameter OP_STY     = 3'b100;
-parameter OP_LDY     = 3'b101;
-parameter OP_CPY     = 3'b110;
-parameter OP_CPX     = 3'b111;
+parameter OP_NOP     = 7'h00;
+parameter OP_MOV     = 7'h02;
+parameter OP_MOVS    = 7'h03;
+parameter OP_XLAT    = 7'h04;
+parameter OP_CLR    = 7'h05;
+parameter OP_SETO    = 7'h06;
+parameter OP_SE    = 7'h07;
+parameter OP_DAA    = 7'h08;
+parameter OP_SWAP    = 7'h09;
+parameter OP_EX    = 7'h0a;
+parameter OP_LEA    = 7'h0b;
+parameter OP_RDTS    = 7'h0c;
+parameter OP_ADD    = 7'h10;
+parameter OP_ADC    = 7'h11;
+parameter OP_SUB    = 7'h12;
+parameter OP_SBC    = 7'h13;
+parameter OP_CMP    = 7'h14;
+parameter OP_CMPS    = 7'h15;
+parameter OP_INC    = 7'h18;
+parameter OP_DEC    = 7'h19;
+parameter OP_MUL    = 7'h1c;
+parameter OP_IMUL   = 7'h1d;
+parameter OP_DIV    = 7'h1e;
+parameter OP_IDIV    = 7'h1f;
+parameter OP_OUT    = 7'h20;
+parameter OP_OUTS    = 7'h21;
+parameter OP_IN    = 7'h22;
+parameter OP_INS    = 7'h23;
+parameter OP_AND    = 7'h28;
+parameter OP_OR    = 7'h29;
+parameter OP_XOR    = 7'h2a;
+parameter OP_NAND    = 7'h2b;
+parameter OP_NOR    = 7'h2c;
+parameter OP_NEG    = 7'h2d;
+parameter OP_NOT    = 7'h2e;
+parameter OP_ABS    = 7'h2f;
+parameter OP_SBO    = 7'h30;
+parameter OP_SBZ    = 7'h31;
+parameter OP_TB     = 7'h32;
+parameter OP_BINS    = 7'h33;
+parameter OP_BXTR    = 7'h34;
+parameter OP_BSFR    = 7'h35;
+parameter OP_ROT    = 7'h38;		// SLA SRA ecc
+parameter OP_MAS    = 7'h3c;
+parameter OP_MSS    = 7'h3d;
+parameter OP_SSA    = 7'h3e;
+parameter OP_VMA    = 7'h3f;
+parameter OP_JMP    = 7'h40;
+parameter OP_BLWP   = 7'h42;
+parameter OP_RET    = 7'h43;
+parameter OP_ENTER  = 7'h44;
+parameter OP_LEAVE  = 7'h45;
+parameter OP_CHK    = 7'h46;
+parameter OP_X      = 7'h47;
+parameter OP_PUSH   = 7'h48;
+parameter OP_POP    = 7'h49;
+parameter OP_LDM    = 7'h4c;
+parameter OP_STM    = 7'h4d;
+parameter OP_B		= 7'h50;
+parameter OP_DJNZ   = 7'h51;
+parameter OP_SKIP   = 7'h52;
+parameter OP_TRAP   = 7'h6f;
+parameter OP_LDIM   = 7'h70;
+parameter OP_LDST   = 7'h71;
+parameter OP_LDWP   = 7'h72;
+parameter OP_STST   = 7'h73;
+parameter OP_STWP   = 7'h74;
+parameter OP_RTWP   = 7'h75;
+parameter OP_RETI   = 7'h76;
+parameter OP_XOP    = 7'h7e;
+parameter OP_HALT   = 7'h7f;
 
-parameter OP_BPL     = 3'b000;
-parameter OP_BMI     = 3'b001;
-parameter OP_BVC     = 3'b010;
-parameter OP_BVS     = 3'b011;
-parameter OP_BCC     = 3'b100;
-parameter OP_BCS     = 3'b101;
-parameter OP_BNE     = 3'b110;
-parameter OP_BEQ     = 3'b111;
-
-// cc = 00, bbb = 000.
-parameter OP_BRK = 3'b000; // _000_00;
-parameter OP_JSR = 3'b001; // _000_00;
-parameter OP_RTI = 3'b010; // _000_00;
-parameter OP_RTS = 3'b011; // _000_00;
-//parameter OP_BRA = 3'b100; // _000_00;
-
-// cc = 00, b = 001.
-//parameter OP_MVP = 3'b010; // _001_00;
-
-// cc = 00, bbb = 010.
-parameter OP_PHP = 3'b000; // _010_00;
-parameter OP_PLP = 3'b001; // _010_00;
-parameter OP_PHA = 3'b010; // _010_00;
-parameter OP_PLA = 3'b011; // _010_00;
-parameter OP_DEY = 3'b100; // _010_00;
-parameter OP_TAY = 3'b101; // _010_00;
-parameter OP_INY = 3'b110; // _010_00;
-parameter OP_INX = 3'b111; // _010_00;
-
-// cc = 00, b = 101.
-//parameter OP_STZ = 3'b011; // _101_00;
-
-// cc = 00, b = 110.
-parameter OP_CLC = 3'b000; // _110_00;
-parameter OP_SEC = 3'b001; // _110_00;
-parameter OP_CLI = 3'b010; // _110_00;
-parameter OP_SEI = 3'b011; // _110_00;
-parameter OP_TYA = 3'b100; // _110_00;
-parameter OP_CLV = 3'b101; // _110_00;
-parameter OP_CLD = 3'b110; // _110_00;
-parameter OP_SED = 3'b111; // _110_00;
-
-// cc = 00, b = 011.
-parameter OP_JMP_ABS   = 3'b011; // _111_00;
-
-// cc = 00, b = 111.
-
-// cc = 01 aaa = op, bbb = mode
-parameter OP_ORA = 3'b000;
-parameter OP_AND = 3'b001;
-parameter OP_EOR = 3'b010;
-parameter OP_ADC = 3'b011;
-parameter OP_STA = 3'b100;
-parameter OP_LDA = 3'b101;
-parameter OP_CMP = 3'b110;
-parameter OP_SBC = 3'b111;
-
-parameter OP_BIT_IMM = 3'b100; // _010_01
-
-
-// cc = 10 aaa = op, bbb = mode
-parameter OP_ASL = 3'b000;
-parameter OP_ROL = 3'b001;
-parameter OP_LSR = 3'b010;
-parameter OP_ROR = 3'b011;
-parameter OP_STX = 3'b100;
-parameter OP_LDX = 3'b101;
-parameter OP_DEC = 3'b110;
-parameter OP_INC = 3'b111;
-
-// cc = 10, b = 010.
-parameter OP_TXA = 3'b100; // _010_10;
-parameter OP_TAX = 3'b101; // _010_10;
-parameter OP_DEX = 3'b110; // _010_10;
-parameter OP_NOP = 3'b111; // _010_10;
-
-// cc = 10, b = 110.
-parameter OP_TXS = 3'b100; // _110_10;
-parameter OP_TSX = 3'b101; // _110_10;
-
-// cc = 10, b = 111.
-//parameter OP_STZ_2 = 3'b100; // _111_10;
 
     // ================== Multiplexing 7-Segmenti ==================
     reg [1:0]  mux_state = 0;
@@ -340,7 +350,7 @@ always @(posedge raw_clk) begin
 	else if (state==STATE_HALTED)
 	leds_value <= 15; 
 	else
-	leds_value <= ~sp /* ~reg_x[7:0]*/;
+	leds_value <= ~regs[0][7:0];
 
 end
 
@@ -355,11 +365,11 @@ always @(posedge clk) begin
       STATE_RESET:
         begin
           flags[FLAG_V] <= 0;
-          flags[FLAG_B] <= 1;
           flags[FLAG_D] <= 0;
-          flags[FLAG_I] <= 0;
+          flags[FLAG_HC] <= 0;
           flags[FLAG_C] <= 0;
           flags[FLAG_Z] <= 0;
+          flags[FLAG_S] <= 0;
           mem_address <= 0;
           mem_write_enable <= 0;
           mem_bus_enable <= 0;
@@ -449,284 +459,18 @@ always @(posedge clk) begin
           mem_bus_enable <= 0;
           instruction <= mem_read;
           state <= STATE_DECODE;
-          pc <= pc + 1;
+          pc <= pc + 4;
         end
 		  
       STATE_DECODE:
         begin
-          case (instruction[1:0])
-            2'b00:
-              /*if (aaa == OP_TSB && bbb[0] == 1) begin
-                next_state <= STATE_TEST_BITS;
-                state <= STATE_FETCH_ABSOLUTE_0;
-              end else */if (bbb == 3'b000 && aaa != OP_LDY && aaa != OP_CPY && aaa != OP_CPX) begin
-                case (aaa)
-                  OP_BRK: 
-							state <= STATE_HALTED;
-                  OP_JSR:
-                    begin
-                      ea <= pc;
-                      pc <= pc + 2;
-                      size_imm <= SIZE_16;
-                      state <= STATE_FETCH_IMMEDIATE_0;
-                      next_state <= STATE_EXECUTE_00_0;
-                    end
-                  OP_RTI:
-                    begin
-                      size_imm <= 3;
-                      state <= STATE_RTI_0;
-                    end
-                  OP_RTS: 
-							begin 
-								size_imm <= SIZE_16; 
-								state <= STATE_POP_0;
-							end
-//                  OP_BRA: 
-//							state <= STATE_BRANCH_0;
-                endcase
-              end else if (bbb == 3'b010) begin
-                if (aaa[2] == 0) begin
-                  // PHP, PLP, PHA, PLA.
-                  result   <= aaa[1] == 1 ? reg_a  : flags[7:0];
-                  size_imm <= /*aaa[1] == 1 ? size_m : */ SIZE_8;
-                  state    <= aaa[0] == 0 ? STATE_PUSH_0 : STATE_POP_0;
-                end else begin
-                  case (aaa[1:0])
-                    // DEY, TAY, INY, INX.
-                    2'b00: result <= reg_y - 1;
-                    2'b01: result <= reg_a;
-                    2'b10: result <= reg_y + 1;
-                    2'b11: result <= reg_x + 1;
-                  endcase
-                  state <= aaa[1:0] == 2'b11 ?
-                    STATE_WRITEBACK_X : STATE_WRITEBACK_Y;
-                end
-              end else if (bbb == 3'b100) begin
-                state <= STATE_BRANCH_0;
-              end /*else if (bbb == 3'b001 && aaa == OP_STZ) begin
-                // stz ZP
-                size_imm <= SIZE_8;
-                next_state <= STATE_STZ;
-                state <= STATE_FETCH_ABSOLUTE_0;
-              end else if (bbb == 3'b001 && aaa == OP_MVP) begin
-                state <= STATE_MOVE_BLOCK_0;
-              end*/ else if (bbb == 3'b011 && aaa == OP_JMP_ABS) begin
-                state <= STATE_JMP_ABS_0;
-              end else if (bbb == 3'b101) begin
-/*                case (aaa)
-                  OP_STZ:
-                    begin
-                      // stz ZP, x
-                      size_imm <= SIZE_8;
-                      next_state <= STATE_STZ;
-                      state <= STATE_FETCH_ABSOLUTE_0;
-                    end
-                endcase*/
-					 
-					 // B4 40 	LDY $40,X  non c'era... 1/7/26
-					 size_imm <= 1;
-					 pc <= pc + 1;
-                state <= STATE_FETCH_IMMEDIATE_0;
+          case (Opcode)
+			OP_NOP:
 
-              end else if (bbb == 3'b110) begin
-                // CLC, SEC, CLI, SEI, TYA, CLV, CLD, SED.
-                case (aaa[2:1])
-                  2'b00: 
-							flags[FLAG_C] <= aaa[0];
-                  2'b01: 
-							flags[FLAG_I] <= aaa[0];
-                  2'b10:
-                    if (aaa[0] == 0)
-                      result <= reg_y;
-                    else
-                      flags[FLAG_V] <= 0;
-                  2'b11: 
-							flags[FLAG_D] <= aaa[0];
-                endcase
-
-                state <= aaa == OP_TYA ? STATE_WRITEBACK_A : STATE_FETCH_OP_0;
-              end else if (bbb == 3'b111) begin
-                /*else if (aaa == OP_STZ_2) begin
-                  // stz absolute;
-                  size_imm <= SIZE_8;
-                  next_state <= STATE_STZ;
-                  state <= STATE_FETCH_ABSOLUTE_0;
-                end*/
-              end else begin
-                if (aaa == OP_JMP && bbb == 3'b011) begin
-                  ea <= pc;
-                  pc <= pc + 2;
-                  size_imm <= 2;
-                  next_state <= STATE_EXECUTE_00_0;
-                  state <= STATE_FETCH_IMMEDIATE_0;
-                end else if (aaa == OP_JMP_IND && bbb == 3'b011) begin
-                  size_imm <= 2;
-                  next_state <= STATE_EXECUTE_00_0;
-                  state <= STATE_FETCH_ABSOLUTE_0;
-                end else begin
-                  case (addressing_mode)
-                    MODE_IMMEDIATE:
-                      begin
-                        ea <= pc;
-
-                        if (aaa == OP_BIT) begin
-                          pc <= pc + SIZE_8;		// VERIFICARE le 2 BIT
-                        end else begin
-                          pc <= pc + 1;
-                          size_imm <= 1;
-                        end
-
-                        state <= STATE_FETCH_IMMEDIATE_0;
-                      end
-                    MODE_ABSOLUTE:   state <= STATE_FETCH_ABSOLUTE_0;
-                    MODE_INDIRECT_X: state <= STATE_FETCH_INDIRECT_0;
-                    MODE_INDIRECT_Y: state <= STATE_FETCH_INDIRECT_0;
-                    MODE_ABSOLUTE_X: state <= STATE_FETCH_ABSOLUTE_0;
-                    MODE_ABSOLUTE_Y: state <= STATE_FETCH_ABSOLUTE_0;
-                    default:         state <= STATE_HALTED;
-                  endcase
-
-                  next_state <= STATE_EXECUTE_00_0;
-                end
-              end
-				  
-            2'b01:
-              begin
-                case (addressing_mode)
-                  MODE_IMMEDIATE:
-                    begin
-                      ea <= pc;
-                      pc <= pc + SIZE_8;
-                      state <= STATE_FETCH_IMMEDIATE_0;
-                    end
-                  MODE_ABSOLUTE:   state <= STATE_FETCH_ABSOLUTE_0;
-                  MODE_INDIRECT_X: state <= STATE_FETCH_INDIRECT_0;
-                  MODE_INDIRECT_Y: state <= STATE_FETCH_INDIRECT_0;
-                  MODE_ABSOLUTE_X: state <= STATE_FETCH_ABSOLUTE_0;
-                  MODE_ABSOLUTE_Y: state <= STATE_FETCH_ABSOLUTE_0;
-                  default:         state <= STATE_ERROR;
-                endcase
-
-                next_state <= STATE_EXECUTE_01_0;
-              end
-				  
-            2'b10:
-              begin
-                if (bbb == 3'b000 && aaa != 3'b101 || instruction[7:2] == 6'b100_000) begin
-                  // stx 100_000_10
-                  // ldx 101_000_10
-                  // stx 0x100  8e  100 011 10
-                  // ldx #5     a2  101 000 10
-                end else if (bbb == 3'b010 && aaa[2] == 1) begin
-                  case (aaa)
-                    OP_TXA: 
-								begin 
-									result <= reg_x; 
-									state <= STATE_WRITEBACK_A; 
-								end
-                    OP_TAX: 
-								begin 
-									result <= reg_a; 
-									state <= STATE_WRITEBACK_X; 
-								end
-                    OP_DEX: 
-								begin result <= reg_x - 1; state <= STATE_WRITEBACK_X; end
-                    OP_NOP: 
-								state <= STATE_FETCH_OP_0;
-                  endcase
-                end else if (bbb == 3'b110) begin
-                  case (aaa)
-                    OP_TXS:
-                      begin
-                        sp <= reg_x;
-                        state <= STATE_FETCH_OP_0;
-                      end
-                    OP_TSX: 
-							begin 
-								result <= sp; 
-								state <= STATE_WRITEBACK_X; 
-							end
-                    default: 
-							state <= STATE_ERROR;
-                  endcase
-
-                  if (aaa[1:0] == 2'b10)
-                    result <= aaa[2] == 0 ? reg_y : reg_x;
-
-                  size_imm <= 1;
-                end else if (bbb == 3'b111) begin
-                  /*if (aaa == OP_STZ_2) begin
-                    // stz absolute, x
-                    size_imm <= SIZE_8;
-                    next_state <= STATE_STZ;
-                    state <= STATE_FETCH_ABSOLUTE_0;
-                  end else */begin
-                    state <= STATE_ERROR;
-                  end
-                end else if (bbb == 3'b100) begin
-                  // Indirect addressing mode (dp).
-                  state <= STATE_FETCH_INDIRECT_0;
-                  next_state <= STATE_EXECUTE_01_0;
-                end else begin
-                  case (addressing_mode)
-                    MODE_IMMEDIATE:
-                      begin
-                        ea <= pc;
-
-                        // Only LDX or STX should be able to end up in
-                        // here.
-                        //if (aaa == OP_LDX || aaa == OP_STX) begin
-                          pc <= pc + 1;
-                          size_imm <= 1;
-                        //end else begin
-                        //  pc <= pc + SIZE_8;
-                        //end
-
-                        state <= STATE_FETCH_IMMEDIATE_0;
-                      end
-                    MODE_ABSOLUTE:
-							state <= STATE_FETCH_ABSOLUTE_0;
-                    MODE_ABSOLUTE_X: 
-							state <= STATE_FETCH_ABSOLUTE_0;
-                    MODE_A:
-                      begin
-                        source <= reg_a;
-                        state <= STATE_EXECUTE_10_0;
-                      end
-                    default:         state <= STATE_ERROR;
-                  endcase
-
-                  next_state <= STATE_EXECUTE_10_0;
-                end
-              end
-            2'b11:
-              case (bbb)
-                3'b010:
-                  begin
-						// tolto cose...
-							size_imm <= SIZE_16;						
-                  end
-                3'b110:
-                  begin
+			OP_MOV:
 
 
-                    state <= STATE_FETCH_OP_0;
-                  end
-                default:
-                  begin
-                    case (addressing_mode)
-                      MODE_STACK_RELATIVE: state <= STATE_FETCH_ABSOLUTE_0;
-                      MODE_ABSOLUTE:       state <= STATE_FETCH_ABSOLUTE_0;
-//                      MODE_INDIRECT_S_Y:   state <= STATE_FETCH_INDIRECT_0;
-                      MODE_ABSOLUTE_X:     state <= STATE_FETCH_ABSOLUTE_0;
-                      default:             state <= STATE_ERROR;
-                    endcase
-
-                    //state <= STATE_ERROR;
-                    next_state <= STATE_EXECUTE_01_0;
-                  end
-            endcase
-          endcase
+		  endcase
 			 
 	  if(!button_halt)
 		 state <= STATE_HALTED;
@@ -790,8 +534,6 @@ always @(posedge clk) begin
 		  
       STATE_FETCH_ABSOLUTE_0:
         begin
-          // MODE_ZP and MODE_ABSOLUTE are the same, the difference is
-          // extra_bytes.
  
           mem_address <= pc;
           mem_bus_enable <= 1;
@@ -868,209 +610,54 @@ always @(posedge clk) begin
 		  
       STATE_EXECUTE_00_0:
         begin
-          if (aaa == OP_JMP || aaa == OP_JMP_IND || (aaa == OP_JSR && bbb == 3'b000)) begin
-            pc[15:0] <= source;
-          end else if (aaa == OP_BIT) begin
-              temp <= reg_a;
-            wb <= 0;
-            affects_n <= 0;
-            flags[FLAG_N] <= source[7];
-            flags[FLAG_V] <= source[6];
-          end else if (aaa == OP_CPY || aaa == OP_LDY || aaa == OP_STY) begin
-            temp <= { 24'b0, reg_y[7:0]  };
-            wb_state <= STATE_WRITEBACK_Y;
-          end else if (aaa == OP_CPX) begin
-            temp <= { 24'b0, reg_x[7:0]  };
-            wb_state <= STATE_WRITEBACK_X;
-          end
-
-          if (aaa == OP_JMP || aaa == OP_JMP_IND) begin
-            state <= STATE_FETCH_OP_0;
-          end else if (aaa == OP_JSR && bbb == 3'b000) begin
-            result <= pc[15:0];
-            state <= STATE_PUSH_0;
-          end else begin
-            state <= STATE_EXECUTE_00_1;
-          end
         end
 		  
       STATE_EXECUTE_00_1:
         begin
-          case (aaa)
-            OP_BIT: 
-					begin 
-						result <= temp & source; 
-						wb <= 0; 
-					end
-            //OP_JMP: result <= temp & source;
-            //OP_JMP_IND: result <= temp ^ source;
-            OP_STY: 
-					result <= temp;
-            OP_LDY: 
-					result <= source;
-            OP_CPY: 
-					begin 
-						result <= temp - source; 
-						wb <= 0; 
-						affects_c <= 1; 
-					end
-            OP_CPX: 
-					begin 
-						result <= temp - source; 
-						wb <= 0; 
-						affects_c <= 1; 
-					end
-          endcase
-
-          if (aaa == OP_STY) begin
-            size_imm <= 1;
-            state <= STATE_WRITEBACK_MEM_0;
-          end else begin
-            state <= wb_state;
-          end
         end
 		  
       STATE_EXECUTE_01_0:
         begin
-          temp <= reg_a;
+
           state <= STATE_EXECUTE_01_1;
         end
 		  
       STATE_EXECUTE_01_1:
         begin
-          case (aaa)
-            OP_ORA: 
-					result <= temp | source;
-            OP_AND: 
-					result <= temp & source;
-            OP_EOR: 
-					result <= temp ^ source;
-            OP_ADC:
-              begin
-                result <= temp + source + flag_c;
-                affects_c <= 1;
-                affects_v <= 1;
-              end
-            OP_STA:
-              if (bbb == 3'b010) begin
-                // OP_BIT_IMM: bit #imm
-                flags[FLAG_N] <= source[7];
-                flags[FLAG_V] <= source[6];
-                affects_n <= 0;
-                wb <= 0;
-                result <= temp & source;
-              end else begin
-                result <= temp;
-              end
-            OP_LDA: 
-					result <= source;
-            OP_CMP:
-              begin
-                result <= temp - source;
-                wb <= 0;
-                is_sub <= 1;
-                affects_c <= 1;
-              end
-            OP_SBC:
-              begin
-                result <= temp - source - 1 + flag_c;
-                is_sub <= 1;
-                affects_c <= 1;
-                affects_v <= 1;
-              end
-          endcase
 
-          // wb_state should always be STATE_WRITEBACK_A.
-          if (aaa == OP_STA && bbb != 3'b010)
-            state <= STATE_WRITEBACK_MEM_0;
-          else
-            state <= wb_state;
         end
 		  
       STATE_EXECUTE_10_0:
         begin
-          if (aaa == OP_STX || aaa == OP_LDX) begin
-            temp <= reg_x;
-            wb_state <= STATE_WRITEBACK_X;
-          end else begin
-            temp <= reg_a;
-          end
 
           state <= STATE_EXECUTE_10_1;
         end
 		  
       STATE_EXECUTE_10_1:
         begin
-          case (aaa)
-            OP_ASL:
-                result[8:0]  <= { source[7],  source[6:0],  1'b0 };
-            OP_ROL:
-                result[8:0]  <= { source[7],  source[6:0],  flag_c };
-            OP_LSR:
-                result[8:0]  <= { source[0], 1'b0, source[7:1]  };
-            OP_ROR:
-                result[8:0]  <= { source[0], flag_c, source[7:1]  };
-            OP_STX: 
-					result <= temp;
-            OP_LDX: 
-					result <= source;
-            OP_DEC: 
-					result <= source - 1;
-            OP_INC: 
-					result <= source + 1;
-          endcase
 
-          // For ASL, ROL, LSR, ROR - the C flag is affected.
-          if (aaa[2] == 0) 
-				affects_c <= 1;
-
-          if (aaa == OP_STX) begin
-            size_imm <= 1;
-            state <= STATE_WRITEBACK_MEM_0;
-          end else if (aaa == OP_LDX) begin
-            state <= STATE_WRITEBACK_X;
-          end else begin
-            state <= addressing_mode == MODE_A ? STATE_WRITEBACK_A : STATE_WRITEBACK_MEM_P;
-          end
         end
 		  
       STATE_WRITEBACK_A:
         begin
-			 if (wb == 1) reg_a[7:0] <= result[7:0];
-			 if (affects_c) flags[FLAG_C] <= result[8];
-			 flags[FLAG_Z] <= result[7:0] == 0;
-			 if (affects_n) flags[FLAG_N] <= result[7];
-			 if (affects_v) flags[FLAG_V] <= temp[7] == (source[7] ^ is_sub) && result[7] != temp[7];
 
           state <= STATE_FETCH_OP_0;
         end
 		  
       STATE_WRITEBACK_X:
         begin
-			if (wb == 1) 
-				reg_x <= result[7:0];
-			 flags[FLAG_Z] <= result[7:0] == 0;
-			 flags[FLAG_N] <= result[7];
 
 		 state <= STATE_FETCH_OP_0;
         end
 		  
       STATE_WRITEBACK_Y:
         begin
-			if (wb == 1) 
-				reg_y <= result[7:0];
-			 flags[FLAG_Z] <= result[7:0] == 0;
-			 flags[FLAG_N] <= result[7];
 
           state <= STATE_FETCH_OP_0;
         end
 		  
       STATE_WRITEBACK_MEM_P:
         begin
-			 if (affects_c) flags[FLAG_C] <= result[8];
-			 flags[FLAG_Z] <= result[7:0] == 0;
-			 flags[FLAG_N] <= result[7];
-			 if (affects_v) flags[FLAG_V] <= temp[7] == (source[7] ^ is_sub) && result[7] != temp[7];
 
           state <= STATE_WRITEBACK_MEM_0;
         end
@@ -1104,17 +691,6 @@ always @(posedge clk) begin
 		  
       STATE_BRANCH_0:
         begin
-          if (bbb == 3'b000)
-            // OP_BRA, OP_BRL.
-            do_branch <= 1;
-          else
-            // BPL, BMI, BVC, BVS, BCC, BCS, BNE, BEQ.
-            case (aaa[2:1])
-              2'b00: do_branch <= flag_n == aaa[0];
-              2'b01: do_branch <= flag_v == aaa[0];
-              2'b10: do_branch <= flag_c == aaa[0];
-              2'b11: do_branch <= flag_z == aaa[0];
-            endcase
 
           pc <= pc + 1;
           mem_address <= pc;
@@ -1205,23 +781,6 @@ always @(posedge clk) begin
 		  
       STATE_POP_WB:
         begin
-          case (cc)
-            2'b00:
-              case (bbb)
-                3'b000:
-                  case (aaa)
-                    OP_RTS: 
-							pc[15:0] <= source[15:0];
-                  endcase
-                3'b010:
-                  case (aaa)
-                    OP_PLP: 
-							flags[7:0] <= source[7:0];
-                    OP_PLA:
-							reg_a[7:0]  <= source[7:0];
-                  endcase
-              endcase
-          endcase
 
           state <= STATE_FETCH_OP_0;
         end

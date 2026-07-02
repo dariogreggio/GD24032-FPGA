@@ -1,12 +1,7 @@
-// W65C832 FPGA Soft Processor
-//  Author: Michael Kohn
-//   Email: mike@mikekohn.net
-//     Web: https://www.mikekohn.net/
-//   Board: iceFUN iCE40 HX8K
-// License: MIT
+// GD24032 basato su W65C832 FPGA Soft Processor di Michael Kohn
+//   Board: Cyclone EP4CE6E22 
 //
-// Copyright 2024-2025 by Michael Kohn
-// GD 30/06/2026  superguerra daiiiiiii
+// GD 07/2026  superguerra & scisma daiiiiiii
 
 // The purpose of this module is to route reads and writes to the 4
 // different memory banks. Originally the idea was to have ROM and RAM
@@ -37,8 +32,8 @@ module memory_bus(
   input  reset
 );
 
-wire [7:0] rom_data_out;
-wire [7:0] ram_data_out;
+wire [31:0] rom_data_out;
+wire [31:0] ram_data_out;
 wire [7:0] peripherals_data_out;
 
 wire [7:0] load_count;
@@ -46,9 +41,9 @@ wire [7:0] load_count;
 //reg [7:0] ram_data_in;
 //reg [7:0] peripherals_data_in;
 
-wire [3:0] bank;
+wire [11:0] bank;
 
-assign bank = address[15:12];
+assign bank = address[31:20];
 
 
 wire ram_write_enable;

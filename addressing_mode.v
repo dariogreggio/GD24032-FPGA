@@ -1,19 +1,17 @@
-// W65C832 FPGA Soft Processor
-//  Author: Michael Kohn
-//   Email: mike@mikekohn.net
-//     Web: https://www.mikekohn.net/
-//   Board: iceFUN iCE40 HX8K
-// License: MIT
+// GD24032 basato su W65C832 FPGA Soft Processor di Michael Kohn
+//   Board: Cyclone EP4CE6E22 
 //
-// Copyright 2024-2025 by Michael Kohn
-// GD 06/2026  superguerra daiiiiiii
+// GD 07/2026  superguerra & scisma daiiiiiii
 
 module addressing_mode(
-  input [1:0] cc,
-  input [2:0] bbb,
-  input [2:0] aaa,
-  output reg [3:0] mode,
-  output reg [2:0] extra_bytes
+	input [2:0] Mm;
+	input [4:0] Rs;
+	input [3:0] Ts;
+	input [4:0] Rd;
+	input [3:0] Td;
+	input [1:0] Sz;
+	output reg [3:0] mode,
+	output reg [2:0] extra_bytes
 );
 
 

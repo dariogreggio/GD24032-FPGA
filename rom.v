@@ -1,22 +1,17 @@
-// W65C832 FPGA Soft Processor
-//  Author: Michael Kohn
-//   Email: mike@mikekohn.net
-//     Web: https://www.mikekohn.net/
-//   Board: iceFUN iCE40 HX8K
-// License: MIT
+// GD24032 basato su W65C832 FPGA Soft Processor di Michael Kohn
+//   Board: Cyclone EP4CE6E22 
 //
-// Copyright 2024 by Michael Kohn
-// Adapted by GD on 30/6/96 for Cyclone EPC4CE6E22
+// GD 07/2026  superguerra & scisma daiiiiiii
 
-// This creates 4096 bytes of ROM on the FPGA itself which begins at 0xf000.
+// This creates 16384 bytes of ROM on the FPGA itself which begins at 0x00000000.
 
 module rom(
   input [11:0] address,
-  output reg [7:0] data_out,
+  output reg [31:0] data_out,
   input clk
 );
 
-reg [7:0] memory [4095:0];
+reg [31:0] memory [4095:0];
 
 initial begin
   $readmemh("rom.txt", memory);
