@@ -10,9 +10,9 @@
 // clocked in and out of of the SPI chips.
 
 module memory_bus(
-  input [15:0] address,
-  input  [7:0] data_in,
-  output reg [7:0] data_out,
+  input [31:0] address,
+  input  [31:0] data_in,
+  output reg [31:0] data_out,
   input  bus_enable,
   input  write_enable,
   output bus_halt,
@@ -34,6 +34,7 @@ module memory_bus(
 
 wire [31:0] rom_data_out;
 wire [31:0] ram_data_out;
+wire [7:0] videoram_data_out;
 wire [7:0] peripherals_data_out;
 
 wire [7:0] load_count;
@@ -47,10 +48,12 @@ assign bank = address[31:20];
 
 
 wire ram_write_enable;
+wire videoram_write_enable;
 wire peripherals_write_enable;
 
-assign ram_write_enable         = (bank <= 3) && write_enable;
-assign peripherals_write_enable = (bank == 4'hd) && write_enable;
+assign ram_write_enable         = (bank == 12'h1) && write_enable;
+assign videoram_write_enable = (bank == 12'hb) && write_enable;
+assign peripherals_write_enable = (bank == 12'hd) && write_enable;
 
 
 // FIXME: The RAM probably need an enable also.
@@ -59,19 +62,20 @@ assign peripherals_enable = (bank == 4'hd) && bus_enable;
 
 
 always @ * begin
-  if (bank <= 3) begin
+  if (bank == 12'h1) begin
     data_out <= ram_data_out;
-  end else if (bank == 4'hf) begin
+  end else if (bank == 12'h0) begin
     data_out <= rom_data_out;
-  end else if (bank == 4'hd) begin
-    data_out <= peripherals_data_out;
+  end else if (bank == 12'hb) begin		// CGA/video
+    data_out <= videoram_data_out;
+//    data_out <= peripherals_data_out;
   end else begin
     data_out <= 0;
   end
 end
 
 ram ram_0(
-  .address      (address[11:0]),
+  .address      (address[10:0]),
   .data_in      (data_in),
   .data_out     (ram_data_out),
   .write_enable (ram_write_enable),
@@ -79,9 +83,17 @@ ram ram_0(
 );
 
 rom rom_0(
-  .address   (address[11:0]),
+  .address   (address[10:0]),
   .data_out  (rom_data_out),
   .clk   (raw_clk)
+);
+
+cgaram videoram(
+  .address      (address[11:0]),
+  .data_in      (data_in),
+  .data_out     (videoram_data_out),
+  .write_enable (videoram_write_enable),
+  .clk          (raw_clk)
 );
 
 peripherals peripherals_0(

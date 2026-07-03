@@ -63,7 +63,7 @@ assign clk = clock_div[21];
 	// v. 74c926 stranamente, usare il bit 15 usa 1-2 celle più che il bit 13 o 14...
 
 // Registers and stack.
-reg [31:0] [31:0] regs;
+reg [31:0] regs[31:0];
 
 reg [2:0] size_imm;
 //reg [2:0] size_wb;
@@ -75,23 +75,27 @@ reg [31:0] pc = 0;
 reg [31:0] ea = 0;
 reg [31:0] ea_indirect;
 
+wire [7:0] Imm8;
 wire [2:0] Mm;
 wire [4:0] Rs;
 wire [3:0] Ts;
+wire [3:0] Cond;
 wire [4:0] Rd;
 wire [3:0] Td;
 wire [1:0] Sz;
-wire Cond;
+wire IsCond;
 wire Ff;
 wire [6:0] Opcode;
+assign Imm8 = instruction[7:0];
 assign Mm  = instruction[2:0];
 assign Rs = instruction[7:3];
 assign Ts = instruction[11:8];
+assign Cond = instruction[11:8];
 assign Rd = instruction[16:12];
 assign Td = instruction[20:17];
-assign Cond = instruction[21];
+assign IsCond = instruction[21];
 assign Sz = instruction[23:22];
-assign Ff = instruction[24];
+assign DoFlags = instruction[24];
 assign Opcode = instruction[31:25];
 
 // (reg_x or reg_y for indexed.
@@ -364,7 +368,7 @@ always @(posedge clk) begin
     case (state)
       STATE_RESET:
         begin
-          flags[FLAG_V] <= 0;
+          flags[FLAG_OV] <= 0;
           flags[FLAG_D] <= 0;
           flags[FLAG_HC] <= 0;
           flags[FLAG_C] <= 0;
@@ -401,13 +405,14 @@ always @(posedge clk) begin
             state <= STATE_FETCH_OP_0;
 	*/			
 				
-          mem_bus_enable <= 0;
-            pc <= 16'hfffc;
-            mem_address <= 16'hfffc;
-//				ea <= 16'hfffc;
+						mem_bus_enable <= 0;
+            pc <= 32'h00000000;
+            mem_address <= 32'h00000000;
+//            sp <= 32'h00000004;
+ //           mem_address <= 32'h00000004;
 
-			 instruction <= 8'h4c;		// non 6c... strano
-				state <= STATE_DECODE;
+						instruction <= 32'h40000000;		// JMP
+						state <= STATE_DECODE;
 				
           end
 
@@ -437,43 +442,47 @@ always @(posedge clk) begin
           mem_address <= pc;
           mem_bus_enable <= 1;
 			 
-			 if(!button_irq && !flag_i) begin
-				size_imm <= 3;
-		          immediate_count <= 0;
-				state <= STATE_IRQ_0;
-				end
-			 else
-				state <= STATE_FETCH_OP_1;
+				 if(!button_irq) begin
+					size_imm <= 3;
+								immediate_count <= 0;
+					state <= STATE_IRQ_0;
+					end
+				 else
+					state <= STATE_FETCH_OP_1;
+					end
 
-			 if(!button_nmi) begin		// finire! test
-				size_imm <= 3;
-		          immediate_count <= 0;
-				state <= STATE_IRQ_0;
-				end
-			 else
-				state <= STATE_FETCH_OP_1;
-        end
 		  
       STATE_FETCH_OP_1:
         begin
           mem_bus_enable <= 0;
           instruction <= mem_read;
-          state <= STATE_DECODE;
+					if (IsCond) begin
+						if (0) begin
+							state <= STATE_FETCH_OP_0;
+						// finire di skippare operandi...
+						end else begin
+							state <= STATE_DECODE;
+						end
+					end else begin
+						state <= STATE_DECODE;
+					end
           pc <= pc + 4;
         end
 		  
       STATE_DECODE:
         begin
           case (Opcode)
-			OP_NOP:
+						OP_NOP:
+							begin
+							end
+						OP_MOV:
+							begin
+							end
 
-			OP_MOV:
-
-
-		  endcase
+					endcase
 			 
-	  if(!button_halt)
-		 state <= STATE_HALTED;
+				if(!button_halt)
+				 state <= STATE_HALTED;
 			 
         end
 		  
@@ -490,7 +499,7 @@ always @(posedge clk) begin
           mem_bus_enable <= 0;
 
           if (addressing_mode == MODE_INDIRECT_X)
-              ea_indirect <= mem_read + reg_x;
+              ea_indirect <= mem_read + regs[0];
             ea_indirect[15:0] <= mem_read;
 
           state <= STATE_FETCH_INDIRECT_2;
@@ -528,7 +537,7 @@ always @(posedge clk) begin
 		  
       STATE_FETCH_INDIRECT_Y:
         begin
-          ea <= ea + reg_y;
+          ea <= ea + regs[0];
           state <= STATE_FETCH_IMMEDIATE_0;
         end
 		  
@@ -560,7 +569,7 @@ always @(posedge clk) begin
             end else if (addressing_mode == MODE_STACK_RELATIVE) begin
               state <= STATE_FETCH_STACK_INDEXED;
             end else begin
-              offset <= addressing_mode == MODE_ABSOLUTE_X ? reg_x : reg_y;
+              offset <= addressing_mode == MODE_ABSOLUTE_X ? regs[0] : regs[0];
               state <= STATE_FETCH_INDEXED;
             end
           else
@@ -574,7 +583,7 @@ always @(posedge clk) begin
 		  
       STATE_FETCH_STACK_INDEXED:
         begin
-          ea <= ea + sp;
+          ea <= ea + regs[30];
           state <= STATE_FETCH_IMMEDIATE_0;
         end
 		  
@@ -719,6 +728,10 @@ always @(posedge clk) begin
       STATE_SET_FLAGS_1:
         begin
           mem_bus_enable <= 0;
+					
+					if (DoFlags) begin
+					end
+
           state <= STATE_FETCH_OP_0;
         end
 		  
@@ -732,7 +745,7 @@ always @(posedge clk) begin
         begin
           mem_bus_enable <= 1;
           mem_write_enable <= 1;
-          mem_address <= {8'b00000001,sp};
+          mem_address <= regs[30];
 
           case (push_count)
             1: mem_write <= result[7:0];
@@ -740,7 +753,7 @@ always @(posedge clk) begin
           endcase
 
           push_count <= push_count - 1;
-          sp <= sp - 1;
+          regs[30] <= regs[30] - 4;
           state <= STATE_PUSH_2;
         end
 		  
@@ -757,8 +770,8 @@ always @(posedge clk) begin
 		  
       STATE_POP_0:
         begin
-          sp <= sp + 1;
-          mem_address <= {8'b00000001,sp};
+          regs[30] <= regs[30] + 4;
+          mem_address <= regs[30];
           mem_bus_enable <= 1;
           pop_count <= pop_count + 1;
           state <= STATE_POP_1;
@@ -787,8 +800,8 @@ always @(posedge clk) begin
 		  
       STATE_RTI_0:
         begin
-          sp <= sp + 1;
-          mem_address <= {8'b00000001,sp};
+          regs[30] <= regs[30] + 4;
+          mem_address <= regs[30];
           mem_bus_enable <= 1;
           immediate_count <= immediate_count + 1;
           state <= STATE_RTI_1;
@@ -818,12 +831,10 @@ always @(posedge clk) begin
 		  
       STATE_TEST_BITS:
         begin
-			 flags[FLAG_Z] <= source[7:0]  & reg_a[7:0]  == 0;
+			 flags[FLAG_Z] <= source[31:0]  & regs[0][31:0]  == 0;
 
-			 if (bbb[2] == 0)
-				result[7:0] <= source[7:0] |  reg_a[7:0];
-			 else
-				result[7:0] <= source[7:0] & ~reg_a[7:0];
+			 
+				result[31:0] <= source[31:0] & ~regs[0][31:0];
           state <= STATE_WRITEBACK_MEM_0;
         end
 		  
@@ -831,7 +842,7 @@ always @(posedge clk) begin
         begin
           mem_address <= pc;
           mem_bus_enable <= 1;
-          pc <= pc + 1;
+          pc <= pc + 4;
           state <= STATE_JMP_ABS_1;
         end
 		  
@@ -841,14 +852,9 @@ always @(posedge clk) begin
             ea_indirect[7:0] <= mem_read;
             state <= STATE_JMP_ABS_0;
           end else begin
-            if (bbb == 3'b011) begin
+
               ea_indirect[15:8] <= mem_read;
               state <= STATE_JMP_ABS_2;
-            end else begin
-// non c'è                ea_indirect <= { mem_read, ea_indirect[7:0] } + reg_x[7:0];
-
-              state <= STATE_JMP_ABS_2;
-            end
           end
 
           indirect_count <= indirect_count + 1;
@@ -871,7 +877,7 @@ always @(posedge clk) begin
           end else begin
             pc <= { mem_read, source[7:0] };
 
-            if (aaa[2] == 1) begin
+            if (Opcode != 7'h40) begin
               // JSR.
               size_imm <= 2;
               result <= pc[15:0];
@@ -897,9 +903,9 @@ always @(posedge clk) begin
         begin
           if(button_halt) begin
             state <= STATE_FETCH_OP_0;
-            flags[FLAG_B] <= 0;
+            //flags[FLAG_B] <= 0;
           end else begin
-            flags[FLAG_B] <= 1;
+            //flags[FLAG_B] <= 1;
           end
 
           mem_bus_enable <= 0;
@@ -908,7 +914,7 @@ always @(posedge clk) begin
 		  
       STATE_IRQ_0:		// opp. unire con STATE_PUSH come in JSR
         begin
-          mem_address <= {8'b00000001,sp};
+          mem_address <= regs[31];
           mem_bus_enable <= 1;
           mem_write_enable <= 1;
           immediate_count <= immediate_count + 1;
@@ -918,7 +924,7 @@ always @(posedge clk) begin
             3: mem_write <= flags;
           endcase
 
-          sp <= sp - 1;
+          regs[31] <= regs[31] - 4;
           state <= STATE_IRQ_1;
         end
 		  
@@ -1018,15 +1024,18 @@ memory_bus memory_bus_0(
 );
 
 addressing_mode addressing_mode_0(
-  .cc          (cc),
-  .bbb         (bbb),
-  .aaa         (aaa),
+  .Mm          (Mm),
+  .Rs          (Rs),
+  .Ts          (Ts),
+  .Rd          (Rd),
+  .Td          (Td),
+  .Sz          (Sz),
   .mode        (addressing_mode),
   .extra_bytes (extra_bytes)
 );
 
 reg_mode reg_mode_0(
-  .x      (flag_b),
+  .x      (flag_b)
 );
 
 endmodule

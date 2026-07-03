@@ -59,3 +59,41 @@ set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
 set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+
+
+set_location_assignment PIN_1 -to leds[0]
+set_location_assignment PIN_2 -to leds[1]
+set_location_assignment PIN_3 -to leds[2]
+set_location_assignment PIN_7 -to leds[3]
+set_location_assignment PIN_11 -to leds[4]
+
+set_location_assignment PIN_24 -to raw_clk
+
+set_location_assignment PIN_88 -to button_reset
+set_location_assignment PIN_80 -to button_halt
+set_location_assignment PIN_89 -to button_irq
+set_location_assignment PIN_114 -to button_nmi
+set_location_assignment PIN_73 -to button_0
+
+
+# ====================== 7-SEGMENTI ======================
+set_location_assignment PIN_51 -to segments[0]
+set_location_assignment PIN_49 -to segments[1]
+set_location_assignment PIN_44 -to segments[2]
+set_location_assignment PIN_38 -to segments[3]
+set_location_assignment PIN_59 -to segments[4]
+set_location_assignment PIN_55 -to segments[5]
+set_location_assignment PIN_42 -to segments[6]
+
+# ====================== DIGIT SELECT (attivo basso) ======================
+set_location_assignment PIN_72 -to digits[3]
+set_location_assignment PIN_68 -to digits[2]
+set_location_assignment PIN_66 -to digits[1]
+set_location_assignment PIN_70 -to digits[0]
+
+set_location_assignment PIN_144 -to speaker_p
+set_location_assignment PIN_143 -to speaker_m
+
+set_location_assignment PIN_10 -to uart_tx_0
+set_location_assignment PIN_23 -to uart_rx_0
+

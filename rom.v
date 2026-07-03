@@ -3,22 +3,22 @@
 //
 // GD 07/2026  superguerra & scisma daiiiiiii
 
-// This creates 16384 bytes of ROM on the FPGA itself which begins at 0x00000000.
+// This creates 8192 bytes of ROM on the FPGA itself which begins at 0x00000000.
 
 module rom(
-  input [11:0] address,
+  input [10:0] address,
   output reg [31:0] data_out,
   input clk
 );
 
-reg [31:0] memory [4095:0];
+reg [31:0] memory [2047:0];
 
 initial begin
   $readmemh("rom.txt", memory);
 end
 
 always @(posedge clk) begin
-  data_out <= memory[address[11:0]];
+  data_out <= memory[address[10:0]];
 end
 
 endmodule

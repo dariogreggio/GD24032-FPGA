@@ -4,12 +4,12 @@
 // GD 07/2026  superguerra & scisma daiiiiiii
 
 module addressing_mode(
-	input [2:0] Mm;
-	input [4:0] Rs;
-	input [3:0] Ts;
-	input [4:0] Rd;
-	input [3:0] Td;
-	input [1:0] Sz;
+	input [2:0] Mm,
+	input [4:0] Rs,
+	input [3:0] Ts,
+	input [4:0] Rd,
+	input [3:0] Td,
+	input [1:0] Sz,
 	output reg [3:0] mode,
 	output reg [2:0] extra_bytes
 );
@@ -18,10 +18,10 @@ module addressing_mode(
 `include "addressing_mode.vinc"
 
 always @ * begin
-  case (cc)
+  case (Ts)
     2'b00:
       begin
-        case (bbb)
+        case (Rs)
           3'b000:
             begin
               mode <= MODE_IMMEDIATE;
@@ -49,7 +49,7 @@ always @ * begin
             end
           3'b101:
             begin
-              if (aaa == 3'b000)
+              if (Rd == 3'b000)
                 mode <= MODE_ZP;
               else
                 mode <= MODE_INDEXED_X;
@@ -62,7 +62,7 @@ always @ * begin
             end
           3'b111:
             begin
-              if (aaa == 3'b000 || aaa == 3'b100)
+              if (Rd == 3'b000 || Rd == 3'b100)
                 mode <= MODE_ABSOLUTE;
               else
                 mode <= MODE_ABSOLUTE_X;
@@ -72,7 +72,7 @@ always @ * begin
       end
     2'b01:
       begin
-        case (bbb)
+        case (Rs)
           3'b000:
             begin
               mode <= MODE_INDIRECT_X;
@@ -117,7 +117,7 @@ always @ * begin
       end
     2'b10:
       begin
-        case (bbb)
+        case (Rs)
           3'b000:
             begin
               mode <= MODE_IMMEDIATE;
@@ -162,7 +162,7 @@ always @ * begin
       end
     2'b11:
       begin
-        case (bbb)
+        case (Rs)
           3'b000:
             begin
               mode <= MODE_STACK_RELATIVE;
