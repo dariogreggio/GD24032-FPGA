@@ -3,8 +3,7 @@
 //
 // GD 07/2026  superguerra & scisma daiiiiiii
 
-module peripherals
-(
+module peripherals(
   input enable,
   input  [5:0] address,
   input  [7:0] data_in,

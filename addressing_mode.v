@@ -11,7 +11,7 @@ module addressing_mode(
 	input [3:0] Td,
 	input [1:0] Sz,
 	output reg [3:0] mode,
-	output reg [2:0] extra_bytes
+	output reg [2:0] extra_words
 );
 
 
@@ -19,174 +19,47 @@ module addressing_mode(
 
 always @ * begin
   case (Ts)
-    2'b00:
+    4'h0:
       begin
-        case (Rs)
-          3'b000:
-            begin
-              mode <= MODE_IMMEDIATE;
-              extra_bytes <= 1;
-            end
-          3'b001:
-            begin
-              mode <= MODE_ZP;
-              extra_bytes <= 1;
-            end
-          3'b010:
-            begin
-              mode <= MODE_NONE;
-              extra_bytes <= 0;
-            end
-          3'b011:
-            begin
-              mode <= MODE_ABSOLUTE;
-              extra_bytes <= 2;
-            end
-          3'b100:
-            begin
-              mode <= MODE_NONE;
-              extra_bytes <= 1;
-            end
-          3'b101:
-            begin
-              if (Rd == 3'b000)
-                mode <= MODE_ZP;
-              else
-                mode <= MODE_INDEXED_X;
-              extra_bytes <= 1;
-            end
-          3'b110:
-            begin
-              mode <= MODE_NONE;
-              extra_bytes <= 1;
-            end
-          3'b111:
-            begin
-              if (Rd == 3'b000 || Rd == 3'b100)
-                mode <= MODE_ABSOLUTE;
-              else
-                mode <= MODE_ABSOLUTE_X;
-              extra_bytes <= 2;
-            end
-        endcase
       end
-    2'b01:
+    4'h1:
       begin
-        case (Rs)
-          3'b000:
-            begin
-              mode <= MODE_INDIRECT_X;
-              extra_bytes <= 1;
-            end
-          3'b001:
-            begin
-              mode <= MODE_ZP;
-              extra_bytes <= 1;
-            end
-          3'b010:
-            begin
-              mode <= MODE_IMMEDIATE;
-              extra_bytes <= 0;
-            end
-          3'b011:
-            begin
-              mode <= MODE_ABSOLUTE;
-              extra_bytes <= 2;
-            end
-          3'b100:
-            begin
-              mode <= MODE_INDIRECT_Y;
-              extra_bytes <= 1;
-            end
-          3'b101:
-            begin
-              mode <= MODE_INDEXED_X;
-              extra_bytes <= 1;
-            end
-          3'b110:
-            begin
-              mode <= MODE_ABSOLUTE_Y;
-              extra_bytes <= 2;
-            end
-          3'b111:
-            begin
-              mode <= MODE_ABSOLUTE_X;
-              extra_bytes <= 2;
-            end
-        endcase
       end
-    2'b10:
+    4'h2:
       begin
-        case (Rs)
-          3'b000:
-            begin
-              mode <= MODE_IMMEDIATE;
-              extra_bytes <= 0;
-            end
-          3'b001:
-            begin
-              mode <= MODE_ZP;
-              extra_bytes <= 1;
-            end
-          3'b010:
-            begin
-              mode <= MODE_A;
-              extra_bytes <= 0;
-            end
-          3'b011:
-            begin
-              mode <= MODE_ABSOLUTE;
-              extra_bytes <= 2;
-            end
-          3'b100:
-            begin
-              mode <= MODE_INDIRECT;
-              extra_bytes <= 1;
-            end
-          3'b101:
-            begin
-              mode <= MODE_INDEXED_X;
-              extra_bytes <= 1;
-            end
-          3'b111:
-            begin
-              mode <= MODE_ABSOLUTE_Y;
-              extra_bytes <= 2;
-            end
-          default:
-            begin
-              mode <= MODE_NONE;
-              extra_bytes <= 0;
-            end
-        endcase
       end
-    2'b11:
+    4'h3:
       begin
-        case (Rs)
-          3'b000:
-            begin
-              mode <= MODE_STACK_RELATIVE;
-              extra_bytes <= 1;
-            end
-          3'b011:
-            begin
-              mode <= MODE_ABSOLUTE;
-              extra_bytes <= 3;
-            end
-          3'b100:
-            begin
-            end
-          3'b111:
-            begin
-              mode <= MODE_ABSOLUTE_X;
-              extra_bytes <= 3;
-            end
-          default:
-            begin
-              mode <= MODE_NONE;
-              extra_bytes <= 0;
-            end
-        endcase
+      end
+    4'h4:
+      begin
+      end
+    4'h5:
+      begin
+      end
+    4'h6:
+      begin
+      end
+    4'h8:
+      begin
+      end
+    4'h9:
+      begin
+      end
+    4'ha:
+      begin
+      end
+    4'hb:
+      begin
+      end
+    4'hc:
+      begin
+      end
+    4'hd:
+      begin
+      end
+    4'he:
+      begin
       end
   endcase
 end

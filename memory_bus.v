@@ -18,16 +18,6 @@ module memory_bus(
   output bus_halt,
   input  clk,
   input  raw_clk,
-  output speaker_p,
-  output speaker_m,
-  output ioport_0,
-  output ioport_1,
-  output ioport_2,
-  output ioport_3,
-  output ioport_4,
-  input  button_0,
-  output uart_tx_0,
-  input  uart_rx_0,
   //output [15:0] debug,
   input  reset
 );
@@ -49,16 +39,14 @@ assign bank = address[31:20];
 
 wire ram_write_enable;
 wire videoram_write_enable;
-wire peripherals_write_enable;
 
 assign ram_write_enable         = (bank == 12'h1) && write_enable;
 assign videoram_write_enable = (bank == 12'hb) && write_enable;
-assign peripherals_write_enable = (bank == 12'hd) && write_enable;
 
 
 // FIXME: The RAM probably need an enable also.
-wire peripherals_enable;
-assign peripherals_enable = (bank == 4'hd) && bus_enable;
+
+
 
 
 always @ * begin
@@ -68,7 +56,6 @@ always @ * begin
     data_out <= rom_data_out;
   end else if (bank == 12'hb) begin		// CGA/video
     data_out <= videoram_data_out;
-//    data_out <= peripherals_data_out;
   end else begin
     data_out <= 0;
   end
@@ -94,28 +81,6 @@ cgaram videoram(
   .data_out     (videoram_data_out),
   .write_enable (videoram_write_enable),
   .clk          (raw_clk)
-);
-
-peripherals peripherals_0(
-  .enable       (peripherals_enable),
-  .address      (address[5:0]),
-  .data_in      (data_in),
-  .data_out     (peripherals_data_out),
-  .write_enable (peripherals_write_enable),
-  .clk          (clk),
-  .raw_clk      (raw_clk),
-  .speaker_p    (speaker_p),
-  .speaker_m    (speaker_m),
-  .ioport_0     (ioport_0),
-  .ioport_1     (ioport_1),
-  .ioport_2     (ioport_2),
-  .ioport_3     (ioport_3),
-  .ioport_4     (ioport_4),
-  .button_0     (button_0),
-  .uart_tx_0    (uart_tx_0),
-  .uart_rx_0    (uart_rx_0),
-  .load_count   (load_count),
-  .reset        (reset)
 );
 
 
