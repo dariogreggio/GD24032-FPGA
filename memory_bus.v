@@ -40,8 +40,8 @@ assign bank = address[31:20];
 wire ram_write_enable;
 wire videoram_write_enable;
 
-assign ram_write_enable         = (bank == 12'h1) && write_enable;
-assign videoram_write_enable = (bank == 12'hb) && write_enable;
+assign ram_write_enable         = (bank == 12'h001) && write_enable;
+assign videoram_write_enable = (bank == 12'h00b) && write_enable;
 
 
 // FIXME: The RAM probably need an enable also.
@@ -50,11 +50,11 @@ assign videoram_write_enable = (bank == 12'hb) && write_enable;
 
 
 always @ * begin
-  if (bank == 12'h1) begin
+  if (bank == 12'h100) begin
     data_out <= ram_data_out;
-  end else if (bank == 12'h0) begin
+  end else if (bank == 12'h000) begin
     data_out <= rom_data_out;
-  end else if (bank == 12'hb) begin		// CGA/video
+  end else if (bank == 12'h00b) begin		// CGA/video
     data_out <= videoram_data_out;
   end else begin
     data_out <= 0;

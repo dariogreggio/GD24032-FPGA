@@ -36,9 +36,9 @@ reg [7:0] memory [4095:0];
 
 always @(posedge clk) begin
   if (write_enable) begin
-    memory[address] <= data_in;
+    memory[address[10:2]] <= data_in;
   end else
-    data_out <= memory[address];
+    data_out <= memory[address[10:2]];
 end
 
 endmodule
