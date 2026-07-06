@@ -1,7 +1,7 @@
 
-parameter SIZE_8  = 1;
-parameter SIZE_16 = 2;
-parameter SIZE_32 = 3;
-parameter SIZE_64 = 4;
+parameter SIZE_8  = 2'd0;
+parameter SIZE_16 = 2'd1;
+parameter SIZE_32 = 2'd2;
+parameter SIZE_64 = 2'd3;
 
 

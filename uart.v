@@ -27,11 +27,11 @@ reg [3:0] rx_count;
 reg [9:0] rx_buffer;
 reg [9:0] tx_buffer;
 
-parameter STATE_IDLE         = 0;
-parameter STATE_TX_NEXT_BIT  = 1;
+parameter STATE_IDLE         = 2'd0;
+parameter STATE_TX_NEXT_BIT  = 2'd1;
 
-parameter STATE_RX_BIT_FRONT = 1;
-parameter STATE_RX_BIT_BACK  = 2;
+parameter STATE_RX_BIT_FRONT = 2'd1;
+parameter STATE_RX_BIT_BACK  = 2'd2;
 
 reg [1:0] rx_state = STATE_IDLE;
 reg [1:0] tx_state = STATE_IDLE;
@@ -58,7 +58,7 @@ always @(posedge raw_clk) begin
           tx_buffer[8:1] <= tx_data;
           tx_buffer[9]   <= 1;
           tx_count   <= 0;
-          tx_divisor <= 0;
+          tx_divisor <= 11'd0;
           tx_state   <= STATE_TX_NEXT_BIT;
         end else begin
           tx_pin  <= 1;
@@ -70,12 +70,12 @@ always @(posedge raw_clk) begin
           tx_divisor <= 0;
           if (tx_count == 10) tx_state <= STATE_IDLE;
         end else begin
-          tx_divisor <= tx_divisor + 1;
+          tx_divisor <= tx_divisor + 11'd1;
         end
 
         if (tx_divisor == 0) begin
           tx_pin   <= tx_buffer[tx_count];
-          tx_count <= tx_count + 1;
+          tx_count <= tx_count + 4'd1;
         end
       end
   endcase
@@ -90,7 +90,7 @@ always @(posedge raw_clk) begin
       begin
         // Wait for start bit to start a read.
         if (rx_pin == 0) begin
-          rx_divisor <= 0;
+          rx_divisor <= 10'd0;
           rx_count   <= 0;
           rx_state   <= STATE_RX_BIT_FRONT;
         end
@@ -101,7 +101,7 @@ always @(posedge raw_clk) begin
           rx_divisor <= 0;
           rx_state <= STATE_RX_BIT_BACK;
         end else begin
-          rx_divisor <= rx_divisor + 1;
+          rx_divisor <= rx_divisor + 10'd1;
         end
       end
     STATE_RX_BIT_BACK:
@@ -121,12 +121,12 @@ always @(posedge raw_clk) begin
             rx_state <= STATE_RX_BIT_FRONT;
           end
         end else begin
-          rx_divisor <= rx_divisor + 1;
+          rx_divisor <= rx_divisor + 10'd1;
         end
 
         if (rx_divisor == 0) begin
           rx_buffer[rx_count] <= rx_pin;
-          rx_count <= rx_count + 1;
+          rx_count <= rx_count + 4'd1;
         end
       end
   endcase
