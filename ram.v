@@ -17,12 +17,13 @@ reg [31:0] memory [2047:0];
 
 always @(posedge clk) begin
   if (write_enable) begin
-    memory[address] <= data_in;
+    memory[address[10:2]] <= data_in;
   end else
-    data_out <= memory[address];
+    data_out <= memory[address[10:2]];
 end
 
 endmodule
+
 
 module cgaram(
   input  [11:0] address,
@@ -38,7 +39,7 @@ always @(posedge clk) begin
   if (write_enable) begin
     memory[address[10:2]] <= data_in;
   end else
-    data_out <= memory[address[10:2]];
+    data_out <= memory[address];
 end
 
 endmodule

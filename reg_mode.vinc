@@ -4,4 +4,6 @@ parameter SIZE_16 = 2'd1;
 parameter SIZE_32 = 2'd2;
 parameter SIZE_64 = 2'd3;
 
+parameter MAX_OPERAND_SIZE = 32;
+parameter MAX_ADDRESS_SIZE = 32;
 

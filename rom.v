@@ -12,7 +12,7 @@ module rom(
 );
 
 reg [31:0] memory [2047:0];
-reg [31:0] i;
+//reg [31:0] i;
 
 initial begin
   $readmemh("rom.txt", memory);
