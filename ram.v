@@ -15,12 +15,31 @@ module ram(
 
 reg [31:0] memory [2047:0];
 
+initial begin
+//dump_memory(0,2047);
+end
+
 always @(posedge clk) begin
   if (write_enable) begin
     memory[address[10:2]] <= data_in;
   end else
     data_out <= memory[address[10:2]];
 end
+
+// Dump di un range di memoria
+task dump_memory;
+    input [31:0] start;
+    input [31:0] end_addr;
+    integer i;
+    begin
+        $display("--- Memory dump [%0d : %0d] ---", start, end_addr);
+        for (i = start; i <= end_addr; i = i + 1) begin
+//				memory[i]=32'h12345678;			// questo si ciuccia 8000 celle!! hmmmmm ;)
+            $display("mem[%0d] = %h", i, memory[i]);
+        end
+        $display("--- End dump ---");
+    end
+endtask
 
 endmodule
 

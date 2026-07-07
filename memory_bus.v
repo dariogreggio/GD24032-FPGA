@@ -32,16 +32,16 @@ wire [7:0] load_count;
 //reg [7:0] ram_data_in;
 //reg [7:0] peripherals_data_in;
 
-wire [11:0] bank;
+wire [15:0] bank;
 
-assign bank = address[31:20];
+assign bank = address[31:16];
 
 
 wire ram_write_enable;
 wire videoram_write_enable;
 
-assign ram_write_enable         = (bank == 12'h001) && write_enable;
-assign videoram_write_enable = (bank == 12'h00b) && write_enable;
+assign ram_write_enable         = (bank == 16'h0010) && write_enable;
+assign videoram_write_enable = (bank == 16'h000b) && write_enable;
 
 
 // FIXME: The RAM probably need an enable also.
@@ -50,11 +50,11 @@ assign videoram_write_enable = (bank == 12'h00b) && write_enable;
 
 
 always @ * begin
-  if (bank == 12'h100) begin
+  if (bank == 16'h0010) begin
     data_out <= ram_data_out;
-  end else if (bank == 12'h000) begin
+  end else if (bank == 16'h0000) begin
     data_out <= rom_data_out;
-  end else if (bank == 12'h00b) begin		// CGA/video
+  end else if (bank == 16'h000b) begin		// CGA/video
     data_out <= videoram_data_out;
   end else begin
     data_out <= 0;
