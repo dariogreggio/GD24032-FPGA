@@ -62,7 +62,7 @@ always @ * begin
 end
 
 ram ram_0(
-  .address      (address[10:0]),
+  .address      (address[11:0]),
   .data_in      (data_in),
   .data_out     (ram_data_out),
   .write_enable (ram_write_enable),
@@ -70,7 +70,7 @@ ram ram_0(
 );
 
 rom rom_0(
-  .address   (address[10:0]),
+  .address   (address[12:0]),
   .data_out  (rom_data_out),
   .clk   (raw_clk)
 );
