@@ -98,6 +98,10 @@ reg [31:0] pc;		// per simulazione PD @£$%&
 `ifdef SIMULATION
 (* preserve, noprune *)
 reg [31:0] reg0;		// per simulazione PD @£$%&
+(* preserve, noprune *)
+reg [31:0] reg1;		// 
+(* preserve, noprune *)
+reg [31:0] reg2;		// 
 `endif
 
 
@@ -134,6 +138,11 @@ assign IsCond = instruction[21];
 assign size_m = instruction[23:22];
 assign DoFlags = instruction[24];
 assign Opcode = instruction[31:25];
+wire [16:0] Branch;
+assign Branch = {instruction[20:12],instruction[7:0]};
+wire [3:0] RotateCnt;
+assign RotateCnt = instruction[6:3];
+
 
 
 // Used for ALU.
@@ -142,6 +151,8 @@ reg [MAX_OPERAND_SIZE-1:0] temp;
 reg [MAX_OPERAND_SIZE:0] result;
 reg wb;
 reg is_sub;
+reg in_repeat;
+reg [1:0] irq_or_trap;		// 0 IRQ, 1 Eccezione, 2 Trap, 3 XOP
 reg affects_c;
 reg affects_ov;
 reg affects_s;		// questo forse non serve
@@ -151,14 +162,15 @@ reg [31:0] block_source;
 reg [31:0] block_destination;
 
 // Addressing mode.
-reg  [1:0] indirect_count;		// # dword
-reg  [1:0] indirect_total;		// # dword
-reg  [3:0] immediate_count;		// 1..8 (arrotondato a dword)
-reg  [5:0] rotate_count;		// 0..63
-reg  [3:0] push_count;
-reg  [3:0] pop_count;		// non � mai usato insieme a push, ma se li unifico spreco pi� celle...
-reg  [3:0] wb_count;		// 1..8 (arrotondato a dword) (usare per write a 64bit
-reg  [1:0] post_count;
+reg [1:0] indirect_count;		// # dword
+reg [1:0] indirect_total;		// # dword
+reg [3:0] immediate_count;		// 1..8 (arrotondato a dword)
+reg [5:0] rotate_count;		// 0..63
+reg [3:0] push_count;
+reg [3:0] pop_count;		// non � mai usato insieme a push, ma se li unifico spreco pi� celle...
+reg [3:0] wb_count;		// 1..8 (arrotondato a dword) (usare per write a 64bit
+reg [1:0] post_count;
+reg [31:0] reg_mask;		// per STM/LDM
 
 
 // Flags.
@@ -224,6 +236,11 @@ assign flag_c   = flags[FLAG_C];
 assign flag_s   = flags[FLAG_S];
 assign flag_z   = flags[FLAG_Z];
 
+reg [4:0] excep_code;		// max 28 codici e vettori
+reg [31:0] excep_addr;
+reg [31:0] excep_pc;
+reg [3:0] excep_state;
+
 // Debug.
 //reg [7:0] debug_0 = 0;
 //reg [7:0] debug_1 = 0;
@@ -241,53 +258,66 @@ parameter STATE_FETCH_INDIRECT_1  = 6'd6;
 parameter STATE_FETCH_INDIRECT_2  = 6'd7;
 parameter STATE_FETCH_INDIRECT_3  = 6'd8;
 
-parameter STATE_FETCH_ABSOLUTE_0  = 6'd10;
-parameter STATE_FETCH_ABSOLUTE_1  = 6'd11;
+parameter STATE_FETCH_IMMEDIATE_0 = 6'd9;
+parameter STATE_FETCH_IMMEDIATE_1 = 6'd10;
 
-parameter STATE_FETCH_INDEXED     = 6'd14;
+parameter STATE_EXECUTE_0_0      = 6'd11;
+parameter STATE_EXECUTE_0_1      = 6'd12;
 
-parameter STATE_FETCH_IMMEDIATE_0 = 6'd15;
-parameter STATE_FETCH_IMMEDIATE_1 = 6'd16;
+parameter STATE_EXECUTE_1_0      = 6'd13;
+parameter STATE_EXECUTE_1_1      = 6'd14;
 
-parameter STATE_EXECUTE_00_0      = 6'd17;
-parameter STATE_EXECUTE_00_1      = 6'd18;
+parameter STATE_EXECUTE_2_0      = 6'd15;
+parameter STATE_EXECUTE_2_1      = 6'd16;
 
-parameter STATE_EXECUTE_01_0      = 6'd19;
-parameter STATE_EXECUTE_01_1      = 6'd20;
+parameter STATE_EXECUTE_3_0      = 6'd17;
+parameter STATE_EXECUTE_3_1      = 6'd18;
 
-parameter STATE_EXECUTE_10_0      = 6'd21;
-parameter STATE_EXECUTE_10_1      = 6'd22;
+parameter STATE_WRITEBACK_R       = 6'd19;
 
-parameter STATE_WRITEBACK_R       = 6'd23;
+parameter STATE_WRITEBACK_MEM_P   = 6'd20;
+parameter STATE_WRITEBACK_MEM_0   = 6'd21;
+parameter STATE_WRITEBACK_MEM_1   = 6'd22;
 
-parameter STATE_WRITEBACK_MEM_P   = 6'd26;
-parameter STATE_WRITEBACK_MEM_0   = 6'd27;
-parameter STATE_WRITEBACK_MEM_1   = 6'd28;
+parameter STATE_SET_FLAGS_0       = 6'd23;
+parameter STATE_SET_FLAGS_1       = 6'd24;
 
-parameter STATE_BRANCH_0          = 6'd29;
-parameter STATE_BRANCH_1          = 6'd30;
+parameter STATE_READ_IO_0         = 6'd25;
+parameter STATE_READ_IO_1         = 6'd26;
 
-parameter STATE_SET_FLAGS_0       = 6'd31;
-parameter STATE_SET_FLAGS_1       = 6'd32;
+parameter STATE_WRITE_IO_0        = 6'd27;
+parameter STATE_WRITE_IO_1        = 6'd28;
 
-parameter STATE_PUSH_0            = 6'd33;
-parameter STATE_PUSH_1            = 6'd34;
-parameter STATE_PUSH_2            = 6'd35;
+parameter STATE_PUSH_0            = 6'd29;
+parameter STATE_PUSH_1            = 6'd30;
+parameter STATE_PUSH_2            = 6'd31;
 
-parameter STATE_POP_0             = 6'd36;
-parameter STATE_POP_1             = 6'd37;
-parameter STATE_POP_WB            = 6'd38;
+parameter STATE_POP_0             = 6'd32;
+parameter STATE_POP_1             = 6'd33;
+parameter STATE_POP_WB            = 6'd34;
 
-parameter STATE_RTI_0             = 6'd43;
-parameter STATE_RTI_1             = 6'd44;
+parameter STATE_RTI_0             = 6'd35;
+parameter STATE_RTI_1             = 6'd36;
 
-parameter STATE_TEST_BITS         = 6'd52;
+parameter STATE_LDM_0            = 6'd37;
+parameter STATE_LDM_1            = 6'd38;
 
-parameter STATE_ERROR             = 6'd59;
-parameter STATE_EXCEPTION         = 6'd60;
-parameter STATE_HALTED            = 6'd61;
-parameter STATE_IRQ_0	          = 6'd62;
-parameter STATE_IRQ_1	          = 6'd63;
+parameter STATE_STM_0            = 6'd39;
+parameter STATE_STM_1            = 6'd40;
+
+parameter STATE_STEX_0            = 6'd41;
+parameter STATE_STEX_1            = 6'd42;
+
+`ifdef USA_DSP
+parameter STATE_VMA_0             = 6'd58;
+`endif
+
+parameter STATE_IRQ_0							= 6'd59;
+parameter STATE_IRQ_1							= 6'd60;
+
+parameter STATE_ERROR             = 6'd61;
+parameter STATE_EXCEPTION         = 6'd62;
+parameter STATE_HALTED            = 6'd63;
 
 // Instruction format: 
 
@@ -412,11 +442,11 @@ end
 // This block is the main CPU instruction execute state machine.
 always @(posedge clk) begin
 
-  tsc <= tsc + 1;		// o a ogni decode??
-	
 `ifdef SIMULATION
 	pc <= regs[31][31:0];		// per simulazione PD @£$%&
 	reg0 <= regs[0][31:0];		// per simulazione PD @£$%&
+	reg1 <= regs[1][31:0];		// per simulazione PD @£$%&
+	reg2 <= regs[2][31:0];		// per simulazione PD @£$%&
 `endif
 
   if(!button_reset)
@@ -468,7 +498,9 @@ always @(posedge clk) begin
  //           mem_address <= 32'h0000000c;
 						wp <= 32'h00000008;		// leggere da ram!
 
-						instruction <= 32'h40000000;		// JMP
+						
+						instruction <= 32'h80880000;		// JMP, INDEXED, Rd=0;		
+						size_imm <= 4'd4;
 						state <= STATE_DECODE;
 
 						
@@ -499,6 +531,8 @@ always @(posedge clk) begin
 					post_count <= 0;
           size_imm <= 4;
           is_sub <= 0;
+					in_repeat <= 0;
+					irq_or_trap <= 0;
           affects_ov <= 0;
           affects_c <= 0;
           affects_s <= 1;
@@ -507,6 +541,9 @@ always @(posedge clk) begin
 //					if (regs[31][1:0] || ssp[1:0] || usp[1:0]) begin				METTERE? o fare diversamente?
 //						state <= STATE_EXCEPTION;
 //					end
+
+					io_bus_enable <= 0;
+					io_write_enable <= 0;
 
           mem_address <= regs[31];
           mem_bus_enable <= 1;
@@ -552,6 +589,8 @@ always @(posedge clk) begin
 		  
       STATE_DECODE:
         begin
+				  tsc <= tsc + 1;		// direi giusto qua
+
 					if(Opcode == OP_MOV || Opcode == OP_MOVS || Opcode == OP_XLAT || Opcode == OP_EX
 					// creare un Opcode senza LSB per fare meglio i confronti?
 						|| Opcode == OP_LEA
@@ -575,7 +614,7 @@ always @(posedge clk) begin
 //										size_imm <= 4'd4;
 									if (size_m == SIZE_8) begin
 										source[7:0] <= Imm8;
-										state <= STATE_EXECUTE_00_0;
+										state <= STATE_EXECUTE_2_0;
 										end
 									else begin
 										ea_indirectS <= regs[31];
@@ -585,7 +624,7 @@ always @(posedge clk) begin
 							MODE_IMMEDIATE8:
 								begin
 									source[7:0] <= Imm8;
-									state <= STATE_EXECUTE_00_0;
+									state <= STATE_EXECUTE_2_0;
 								end
 							MODE_REGISTER:
 								begin
@@ -601,7 +640,7 @@ always @(posedge clk) begin
 												;
 											end
 									endcase
-									state <= STATE_EXECUTE_00_0;
+									state <= STATE_EXECUTE_2_0;
 								end
 							MODE_REGISTER_INDIRECT:
 								begin
@@ -740,26 +779,47 @@ always @(posedge clk) begin
 							|| Opcode == OP_RET || Opcode == OP_POP || Opcode == OP_LDM
 							|| Opcode == OP_STM || Opcode == OP_STST || Opcode == OP_STSP
 							) begin
-							state <= STATE_EXECUTE_00_0;
+							state <= STATE_EXECUTE_2_0;
 							end 
 						else if(Opcode == OP_ROT) begin
-							state <= STATE_EXECUTE_10_0;
+							state <= STATE_EXECUTE_3_0;
 							end 
 						else if(Opcode == OP_B) begin
 						  if (condIsOk(Cond)) begin
-								regs[31][31:0] <= $signed(regs[31][31:0]) + $signed({instruction[20:12],instruction[7:0],2'b0});
+								regs[31][31:0] <= $signed(regs[31][31:0]) + $signed( { Branch,2'd0 } );
 								end
 							state <= STATE_FETCH_OP_0;
 							end
 						else if(Opcode == OP_POP) begin
-							size_imm <= SIZE_32;
+							size_imm <= 4'd4;
 							state <= STATE_POP_0;
 						end
 						else if(Opcode == OP_NOP) begin
 							state <= STATE_FETCH_OP_0;
 						end
+						else if(Opcode == OP_TRAP) begin
+							if (!Imm8[7] || flag_ov) begin		// TRAPV
+								immediate_count <= 0;
+								size_imm <= 4'd8;
+//								result[31:0] <= regs[31][31:0];
+//									regs[31] <= 32'h00000100 | (Imm8[5:0] << 3);
+								// FARE INDIREZIONE!!
+
+								// SALVARE WP?!
+								wp <= 32'h00000104 | (Imm8 << 3);
+								// FARE INDIREZIONE!!
+
+								flags[FLAG_CPUMODE+1:FLAG_CPUMODE] <= MODE_SVC;
+								irq_or_trap <= 2;
+								flags[FLAG_TRAP] <= 1;
+								state <= STATE_IRQ_0;
+
+							end
+							else
+								state <= STATE_FETCH_OP_0;
+							end
 						else
-							state <= STATE_EXECUTE_00_0;
+							state <= STATE_EXECUTE_2_0;
 					end
 			 
 				if(!button_halt)
@@ -778,7 +838,7 @@ always @(posedge clk) begin
       STATE_FETCH_INDIRECT_1:
         begin
           mem_bus_enable <= 0;
-          ea_indirectS[31:0] <= ea_indirectS[31:0]+mem_read[31:0];
+          ea_indirectS[31:0] <= ea_indirectS[31:0] + mem_read[31:0];
           state <= STATE_FETCH_INDIRECT_2;
         end
 		  
@@ -813,13 +873,13 @@ always @(posedge clk) begin
           endcase
 
           if (indirect_count == indirect_total) begin
-            state <= STATE_EXECUTE_00_0;
+            state <= STATE_EXECUTE_2_0;
           end else begin
             state <= STATE_FETCH_INDIRECT_2;
           end
         end
 		  
-      STATE_FETCH_IMMEDIATE_0:			// 15
+      STATE_FETCH_IMMEDIATE_0:			// 11
         begin
           mem_address <= ea_indirectS + immediate_count;
           mem_bus_enable <= 1;
@@ -828,7 +888,7 @@ always @(posedge clk) begin
           state <= STATE_FETCH_IMMEDIATE_1;
         end
 		  
-      STATE_FETCH_IMMEDIATE_1:			// 16
+      STATE_FETCH_IMMEDIATE_1:			// 12
         begin
           mem_bus_enable <= 0;
 
@@ -846,14 +906,15 @@ always @(posedge clk) begin
           endcase
 
           if (immediate_count == size_imm)
-            state <= STATE_EXECUTE_00_0;
+            state <= STATE_EXECUTE_2_0;
           else
             state <= STATE_FETCH_IMMEDIATE_0;
         end
 		  
-      STATE_EXECUTE_00_0:		// 17
+      STATE_EXECUTE_2_0:		// 13; pre-esecuzione, vado a leggere secondo operando
         begin
 					if(Opcode == OP_PUSH) begin
+						result[31:0] <= source[31:0];
 						state <= STATE_PUSH_0;
 					end
 					else if(Opcode == OP_LDIM) begin
@@ -894,10 +955,10 @@ always @(posedge clk) begin
 										ea_indirectD <= 0;
 									end
 									regs[31] <= regs[31] + 4;
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 								end
 							default:
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 							endcase
 					end
 					else if(Opcode != OP_MOV) begin
@@ -912,18 +973,18 @@ always @(posedge clk) begin
 //										size_imm <= 4'd4;
 									if (size_m == SIZE_8) begin			// ma qua c'� o no??
 										temp[7:0] <= Imm8;
-										state <= STATE_EXECUTE_01_1;
+										state <= STATE_EXECUTE_2_1;
 										end
 									else begin
 										ea_indirectD <= regs[31];
 										regs[31] <= regs[31] + 4;
-										state <= STATE_EXECUTE_00_1;
+										state <= STATE_EXECUTE_1_0;
 									end
 								end
 							MODE_IMMEDIATE8:		// ma qua c'� o no??
 								begin
 									temp[7:0] <= Imm8;
-									state <= STATE_EXECUTE_01_1;
+									state <= STATE_EXECUTE_2_1;
 								end
 							MODE_REGISTER:
 								begin
@@ -939,12 +1000,12 @@ always @(posedge clk) begin
 												;
 											end
 									endcase
-									state <= STATE_EXECUTE_01_1;
+									state <= STATE_EXECUTE_2_1;
 								end
 							MODE_REGISTER_INDIRECT:
 								begin
 									ea_indirectD <= regs[Rd];
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 								end
 							MODE_INDEXED:
 								begin
@@ -953,18 +1014,18 @@ always @(posedge clk) begin
 									end else begin
 										ea_indirectD <= 0;
 									end
-									regs[31] <= regs[31] + 4;
-									state <= STATE_EXECUTE_00_1;
+//									regs[31] <= regs[31] + 4;
+									state <= STATE_EXECUTE_0_0;
 								end
 							MODE_INDEXED_2_REG:
 								begin
 									ea_indirectD <= regs[Rd]+regs[Mm];		// sicuro qua?
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 								end
 							MODE_INDEXED_SHORT:
 								begin
 									ea_indirectD <= regs[Rd]+Imm8;				// sicuro qua?
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 								end
 							MODE_INDIRECT_PREINC:
 								begin
@@ -982,7 +1043,7 @@ always @(posedge clk) begin
 											regs[Rd] <= regs[Rd]+4;
 											end
 									endcase
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 								end
 							MODE_INDIRECT_PREDEC:
 								begin
@@ -1000,18 +1061,18 @@ always @(posedge clk) begin
 											regs[Rd] <= regs[Rd]-4;
 											end
 									endcase
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 								end
 							MODE_INDIRECT_POSTINC:
 								begin
 									ea_indirectD <= regs[Rd];
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 									post_count <= 1;
 								end
 							MODE_INDIRECT_POSTDEC:
 								begin
 									ea_indirectD <= regs[Rd];
-									state <= STATE_EXECUTE_00_1;
+									state <= STATE_EXECUTE_1_0;
 									post_count <= -1;		// 2'd non lo prende...
 								end
 							MODE_INDIRECT64:
@@ -1053,24 +1114,40 @@ always @(posedge clk) begin
 							state <= STATE_POP_0;
 						end
 						else begin
-							state <= STATE_EXECUTE_00_1;
+//							state <= STATE_EXECUTE_1_0;
 						end
 					end
 					
 					end
 
+      STATE_EXECUTE_0_0:		// 11; qua faccio indirezione a partire da valore subito dopo PC
+        begin
+          mem_address <= regs[31];
+					regs[31] <= regs[31]+4;
+          mem_bus_enable <= 1;
+          immediate_count <= 0;
+					size_imm <= 4;
+		      state <= STATE_EXECUTE_0_1;
+				end
 
+      STATE_EXECUTE_0_1:		// 12
+        begin
+          mem_bus_enable <= 0;
+          ea_indirectD <= ea_indirectD + mem_read[31:0];
+
+          state <= STATE_EXECUTE_1_0;
+				end
 		  
-      STATE_EXECUTE_00_1:			// 18
+      STATE_EXECUTE_1_0:			// 13; qua faccio indirezione a partire da ea_indirectD
         begin
           mem_address <= ea_indirectD + immediate_count;
 //					regs[31] <= regs[31]+4;
           mem_bus_enable <= 1;
           immediate_count <= immediate_count + 4'd4;
-	      state <= STATE_EXECUTE_01_0;
+	      state <= STATE_EXECUTE_1_1;
         end
 		  
-      STATE_EXECUTE_01_0:			// 19
+      STATE_EXECUTE_1_1:			// 14
         begin
           mem_bus_enable <= 0;
           case (size_m)
@@ -1086,18 +1163,21 @@ always @(posedge clk) begin
 							end
           endcase
           if (immediate_count == size_imm)
-	          state <= STATE_EXECUTE_01_1;
+	          state <= STATE_EXECUTE_2_1;
           else
-	          state <= STATE_EXECUTE_00_1;
+	          state <= STATE_EXECUTE_1_0;
         end
 		  
-      STATE_EXECUTE_01_1:			// 20
+      STATE_EXECUTE_2_1:			// 16; eseguo istruzione
         begin
           state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
 
           case (Opcode)
-            OP_MOV:
-							result <= source;
+            OP_MOV,OP_MOVS:
+							begin
+								result <= source;
+								in_repeat <= Opcode[0];
+							end
             OP_CLR:
 							result <= 0;
             OP_SET:
@@ -1126,15 +1206,15 @@ always @(posedge clk) begin
             OP_NOR:
 							result <= ~(temp | source);
             OP_NEG:
-							result <= ~source;
+							result <= ~temp;
             OP_NOT:
 							case (size_m)
-								SIZE_8:  result <= source[7:0] ? 0 : ~0;
-								SIZE_16: result <= source[15:0] ? 0 : ~0;
-								SIZE_32: result <= source[31:0] ? 0 : ~0;
+								SIZE_8:  result <= temp[7:0] ? 0 : ~0;
+								SIZE_16: result <= temp[15:0] ? 0 : ~0;
+								SIZE_32: result <= temp[31:0] ? 0 : ~0;
 								SIZE_64: begin
 									if (MAX_OPERAND_SIZE==64) begin
-										result <= source[63:0] ? 0 : ~0;
+										result <= temp[63:0] ? 0 : ~0;
 									end
 									else
 										;
@@ -1142,12 +1222,12 @@ always @(posedge clk) begin
 							endcase
             OP_ABS:
 							case (size_m)
-								SIZE_8:  result <= source[7] ? -source[7:0] : source[7:0];
-								SIZE_16: result <= source[15] ? -source[15:0] : source[15:0];
-								SIZE_32: result <= source[31] ? -source[31:0] : source[31:0];
+								SIZE_8:  result <= temp[7] ? -temp[7:0] : temp[7:0];
+								SIZE_16: result <= temp[15] ? -temp[15:0] : temp[15:0];
+								SIZE_32: result <= temp[31] ? -temp[31:0] : temp[31:0];
 								SIZE_64: begin
 									if (MAX_OPERAND_SIZE==64) begin
-										result <= source[63] ? -source[63:0] : source[63:0];
+										result <= temp[63] ? -temp[63:0] : temp[63:0];
 									end
 									else
 										;
@@ -1256,7 +1336,7 @@ always @(posedge clk) begin
                 affects_c <= 1;
                 affects_ov <= 1;
               end
-            OP_CMP:
+            OP_CMP,OP_CMPS:
               begin
 								case (size_m)
 									SIZE_8: result[8:0] <= source[7:0] - temp[7:0];
@@ -1270,6 +1350,7 @@ always @(posedge clk) begin
 											;
 										end
 								endcase
+								in_repeat <= Opcode[0];
                 wb <= 0;
                 is_sub <= 1;
                 affects_c <= 1;
@@ -1378,6 +1459,17 @@ always @(posedge clk) begin
                 affects_c <= 1;
                 affects_ov <= 1;
               end
+
+            OP_BINS:
+							begin
+              end
+            OP_BXTR:
+							begin
+              end
+            OP_BSFR:
+							begin
+              end
+
             OP_STST:
 							result[31:0] <= flags[31:0];
             OP_STSP:
@@ -1390,9 +1482,13 @@ always @(posedge clk) begin
 										result[MAX_ADDRESS_SIZE-1:0] <= usp;
 									end
 								default:		// STEX
+									begin
+										immediate_count <= 0;
+										state <= STATE_STEX_0;
+									end
 
-									;
 							endcase
+
             OP_LEA:
 							begin
 								result[MAX_ADDRESS_SIZE-1:0] <= ea_indirectS[MAX_ADDRESS_SIZE-1:0];
@@ -1430,33 +1526,189 @@ always @(posedge clk) begin
 							end
             OP_CHK:
 							begin
+								case (size_m)
+									SIZE_8: begin 
+										if (temp[7:0] < 0 || temp[7:0] > source[7:0])
+											state <= STATE_EXCEPTION;
+										end
+									SIZE_16: begin 
+										if (temp[15:0] < 0 || temp[15:0] > source[15:0])
+											state <= STATE_EXCEPTION;
+										end
+									SIZE_32: begin
+										if (temp[31:0] < 0 || temp[31:0] > source[31:0])
+											state <= STATE_EXCEPTION;
+										end
+									SIZE_64: begin
+										if (MAX_OPERAND_SIZE==64) begin
+											if (temp[63:0] < 0 || temp[63:0] > source[63:0])
+												state <= STATE_EXCEPTION;
+											end
+										else
+											;
+										end
+								endcase
 
 							end
 
             OP_LDM:
 							begin
-		            state <= STATE_WRITEBACK_R;		// finire!
+								reg_mask[31:0] <= source[31:0];
+		            state <= STATE_LDM_0;		// finire!
 							end
             OP_STM:
 							begin
-		            state <= STATE_WRITEBACK_MEM_P;	// finire!
+								reg_mask[31:0] <= source[31:0];
+		            state <= STATE_STM_0;	// finire!
 							end
 				
-            OP_MAS:
-							begin
-		            state <= STATE_WRITEBACK_MEM_P;	// finire!
-							end
-            OP_MSS:
-							begin
-		            state <= STATE_WRITEBACK_MEM_P;	// finire!
-							end
+						`ifdef USA_DSP
+            OP_MAS,OP_MSS:
+              begin
+								case (size_m)
+									SIZE_8: 
+										begin
+											result[7:0] <= temp[7:0];
+											if (source[7:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[7:0] <= result[7:0] * -source[7:0];
+												else
+													result[7:0] <= result[7:0] * source[7:0];
+											end
+											else
+												result[7:0] <= result[7:0] * result[7:0];
+											if (Opcode == OP_MAS)
+												result[7:0] <= result[7:0] + regs[Imm8][7:0];
+											else
+												result[7:0] <= result[7:0] - regs[Imm8][7:0];
+										end
+									SIZE_16:
+										begin
+											result[15:0] <= temp[15:0];
+											if (source[15:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[15:0] <= result[15:0] * -source[15:0];
+												else
+													result[15:0] <= result[15:0] * source[15:0];
+											end
+											else
+												result[15:0] <= result[15:0] * result[15:0];
+											if (Opcode == OP_MAS)
+												result[15:0] <= result[15:0] + regs[Imm8][15:0];
+											else
+												result[15:0] <= result[15:0] - regs[Imm8][15:0];
+										end
+									SIZE_32:
+										begin
+											result[31:0] <= temp[31:0];
+											if (source[31:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[31:0] <= result[31:0] * -source[31:0];
+												else
+													result[31:0] <= result[31:0] * source[31:0];
+											end
+											else
+												result[31:0] <= result[31:0] * result[31:0];
+											if (Opcode == OP_MAS)
+												result[31:0] <= result[31:0] + regs[Imm8][31:0];
+											else
+												result[31:0] <= result[31:0] - regs[Imm8][31:0];
+										end
+									SIZE_64: begin
+										if (MAX_OPERAND_SIZE==64) begin
+											if (source[63:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[63:0] <= result[63:0] * -source[63:0];
+												else
+													result[63:0] <= result[63:0] * source[63:0];
+											end
+											else
+												result[63:0] <= result[63:0] * result[63:0];
+											if (Opcode == OP_MAS)
+												result[63:0] <= result[63:0] + regs[Imm8][63:0];
+											else
+												result[63:0] <= result[63:0] - regs[Imm8][63:0];
+										end
+										else
+											;
+										end
+								endcase
+                affects_c <= 1;
+                affects_ov <= 1;
+              end
             OP_SSA:
 							begin
-		            state <= STATE_WRITEBACK_MEM_P;	// finire!
+								case (size_m)
+									SIZE_8: 
+										begin
+											result[7:0] <= source[7:0]*source[7:0];
+											if (source[7:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[7:0] <= result[7:0] + regs[Imm8][7:0]*regs[Imm8][7:0];
+											end
+											result[7:0] <= result[7:0] + temp[7:0];
+										end
+									SIZE_16:
+										begin
+											result[15:0] <= source[15:0]*source[15:0];
+											if (source[15:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[15:0] <= result[15:0] + regs[Imm8][15:0]*regs[Imm8][15:0];
+											end
+											result[15:0] <= result[15:0] + temp[15:0];
+										end
+									SIZE_32:
+										begin
+											result[31:0] <= source[31:0]*source[31:0];
+											if (source[31:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[31:0] <= result[31:0] + regs[Imm8][31:0]*regs[Imm8][31:0];
+											end
+											result[31:0] <= result[31:0] + temp[31:0];
+										end
+									SIZE_64: begin
+										if (MAX_OPERAND_SIZE==64) begin
+											result[63:0] <= source[63:0]*source[63:0];
+											if (source[63:0]) begin
+												if (instruction[21]) 			// sarebbe Condiz
+													result[63:0] <= result[63:0] + regs[Imm8][63:0]*regs[Imm8][63:0];
+											end
+											result[63:0] <= result[63:0] + temp[63:0];
+										end
+										else
+											;
+										end
+								endcase
 							end
             OP_VMA:
 							begin
-		            state <= STATE_WRITEBACK_MEM_P;	// finire!
+
+		            state <= STATE_VMA_0;	// finire!
+							end
+						`endif
+
+            OP_IN,OP_INS:
+							begin
+								io_bus_enable <= 1;
+								case (size_m)
+									SIZE_8: result[7:0] <= io_read[7:0];
+									SIZE_16: result[11:0] <= io_read[7:0];		// boh, vedere se..
+									SIZE_32: result[31:0] <= io_read[7:0];
+								endcase
+							in_repeat <= Opcode[0];
+	            state <= STATE_READ_IO_0;
+							end
+            OP_OUT,OP_OUTS:
+							begin
+								io_bus_enable <= 1;
+								io_write_enable <= 1;
+								case (size_m)
+									SIZE_8: io_write[7:0] <= source[7:0];
+									SIZE_16: io_write[7:0] <= source[7:0];		// boh idem
+									SIZE_32: io_write[7:0] <= source[7:0];
+								endcase
+							in_repeat <= Opcode[0];
+	            state <= STATE_WRITE_IO_0;
 							end
 
 						OP_JMP:
@@ -1465,7 +1717,7 @@ always @(posedge clk) begin
 							end
 						OP_DJNZ:
 							begin
-								state <= STATE_EXECUTE_10_0;	// vado a eseguire DEC! ma forse � sbagliato.. deve riscrivere su S e non su D
+								state <= STATE_EXECUTE_3_0;	// vado a eseguire DEC! ma forse � sbagliato.. deve riscrivere su S e non su D
 							end
 						OP_SKIP:
 							begin
@@ -1514,76 +1766,76 @@ always @(posedge clk) begin
 									state <= STATE_FETCH_OP_0;
 								end
 							end
-						OP_TRAP:
+						OP_RETI:
 							begin
-								if (!Imm8[7] && flag_ov) begin		// TRAPV
-									immediate_count <= 0;
-									size_imm <= 4;
-									result[31:0] <= regs[31][31:0];
-									state <= STATE_PUSH_0;		
-//									regs[31] <= 32'h00000100 | (Imm8 << 3);
-									// FARE INDIREZIONE!!
-
-									// SALVARE WP?!
-									wp <= 32'h00000104 | (Imm8 << 3);
-									// FARE INDIREZIONE!!
-									end
-								else
-									state <= STATE_FETCH_OP_0;
+								if (flag_cpumode<MODE_SVC)
+									state <= STATE_EXCEPTION;
+								flags[FLAG_TRAP] <= 0;
+								state <= STATE_RTI_0;
 							end
-						OP_XOP:
+						OP_XOP:		// VERIFICARE e inserire sopra!
 							begin
 								immediate_count <= 0;
 								size_imm <= 4;
 								result[31:0] <= regs[31][31:0];
-								state <= STATE_PUSH_0;		
+								state <= STATE_IRQ_0;
 	//	            regs[31] <= 32'h00000100 | (Imm8 << 3);
 								// FARE INDIREZIONE!!
 
 		            wp <= 32'h00000104 | (Imm8 << 3);
 									// FARE INDIREZIONE!!
+
+									irq_or_trap <= 3;
 							end
 
 						OP_X:
 							begin
+								instruction[31:0] <= source[31:0];
+								source[31:0] <= temp[31:0];
+								state <= STATE_DECODE;
 
 							end
          endcase
 
         end
 		  
-      STATE_EXECUTE_10_0:
+      STATE_EXECUTE_3_0:		// altra execute, per casi speciali
         begin
-			case (Opcode)
-				OP_ROT:
-					begin
-						if(Rs[4])		// 
-							rotate_count = Rs[3:0];
-						else
-							rotate_count = regs[Rs[3:0]][5:0];
-							// gestire 64bit!!?
-						if(!rotate_count)
-							rotate_count <= 63;    // gestire 64bit!!?
-						state <= STATE_EXECUTE_10_1;
-					end
-				OP_DEC,OP_DJNZ:
-					begin
-						result <= source - 1;
-						if (result)
-							regs[31] <= temp[MAX_ADDRESS_SIZE-1:0];	
+					case (Opcode)
+						OP_ROT:
+							begin
+								if(Rs[4])		// 
+									rotate_count = RotateCnt;
+								else
+									rotate_count = regs[Rs[3:0]][5:0];
+									// gestire 64bit!!?
+								if(!rotate_count)
+									rotate_count <= 63;    // gestire 64bit!!?
+								state <= STATE_EXECUTE_3_1;
+							end
+						OP_DJNZ:
+							begin
+								result <= source - 1;
+								if (result)
+									regs[31] <= temp[MAX_ADDRESS_SIZE-1:0];	
 
-		        state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
-					end
-				OP_INC: 
-					begin
-						result <= temp + 1;
-		        state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
-					end
-			endcase
+								state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+							end
+						OP_DEC:
+							begin
+								result <= temp - 1;
+								state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+							end
+						OP_INC: 
+							begin
+								result <= temp + 1;
+								state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+							end
+					endcase
 
         end
 		  
-      STATE_EXECUTE_10_1:
+      STATE_EXECUTE_3_1:
         begin
 
           case (Opcode)
@@ -1669,14 +1921,18 @@ always @(posedge clk) begin
 									;
 								end
 						endcase
+					end
 						
-						if (DoFlags)
-							state <= STATE_SET_FLAGS_0;
+					if (DoFlags)
+						state <= STATE_SET_FLAGS_0;
+					else begin
+						if (in_repeat) begin
+							regs[Imm8] <= regs[Imm8] - 1;
+							state <= regs[Imm8] ? STATE_DECODE : STATE_FETCH_OP_0;
+						end
 						else
 							state <= STATE_FETCH_OP_0;
 					end
-					else
-						state <= STATE_FETCH_OP_0;
 	      end
 	  
       STATE_WRITEBACK_MEM_P:		// 26
@@ -1777,8 +2033,14 @@ always @(posedge clk) begin
 
 						if (DoFlags)
 							state <= STATE_SET_FLAGS_0;
-						else
-		          state <= STATE_FETCH_OP_0;
+						else begin
+							if (in_repeat) begin
+								regs[Imm8] <= regs[Imm8] - 1;
+								state <= regs[Imm8] ? STATE_DECODE : STATE_FETCH_OP_0;
+							end
+							else
+								state <= STATE_FETCH_OP_0;
+						end
 					end
           else
             state <= STATE_WRITEBACK_MEM_0;
@@ -1827,9 +2089,35 @@ always @(posedge clk) begin
 							end
 					endcase
 
-          state <= STATE_FETCH_OP_0;
+					if (in_repeat) begin
+						regs[Imm8] <= regs[Imm8] - 1;
+						state <= regs[Imm8] ? STATE_DECODE : STATE_FETCH_OP_0;
+					end
+					else
+						state <= STATE_FETCH_OP_0;
         end
 		  
+			STATE_READ_IO_0:
+        begin
+					io_bus_enable <= 0;
+					state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+        end
+
+			STATE_READ_IO_1:
+        begin
+        end
+
+			STATE_WRITE_IO_0:
+        begin
+					io_write_enable <= 0;
+					io_bus_enable <= 0;
+					state <= STATE_FETCH_OP_0;
+        end
+
+			STATE_WRITE_IO_1:
+        begin
+        end
+
       STATE_PUSH_0:
         begin
           push_count <= size_imm;
@@ -1863,18 +2151,18 @@ always @(posedge clk) begin
 		  
       STATE_PUSH_2:
         begin
-          mem_bus_enable <= 0;
           mem_write_enable <= 0;
+          mem_bus_enable <= 0;
 
           if (push_count == 0) begin
 						case (Opcode)
 							OP_TRAP:
 								begin
-									regs[31] <= 32'h00000100 | (Imm8 << 3);
+									state <= STATE_IRQ_0;
 								end
 							OP_XOP:
 								begin
-									regs[31] <= 32'h00000100 | (Imm8 << 3);
+									state <= STATE_IRQ_0;
 								end
 							default:
 								state <= STATE_FETCH_OP_0;
@@ -1946,12 +2234,12 @@ always @(posedge clk) begin
       STATE_RTI_0:
         begin
 					if(flag_cpumode==MODE_SVC) begin
-						ssp <= ssp + 4;
 						mem_address <= ssp;
+						ssp <= ssp + 4;
 						end
 					else begin
-						usp <= usp + 4;
 						mem_address <= usp;
+						usp <= usp + 4;
 						end
           mem_bus_enable <= 1;
           immediate_count <= immediate_count + 4'd4;
@@ -1963,8 +2251,8 @@ always @(posedge clk) begin
           mem_bus_enable <= 0;
 
           case (immediate_count)
-            1: flags[31:0] <= mem_read[31:0];
-            2: regs[31][31:0]  <= mem_read[31:0];
+            4: flags[31:0] <= mem_read[31:0];
+            8: regs[31][31:0]  <= mem_read[31:0];
           endcase
 
           if (immediate_count == size_imm)
@@ -1973,16 +2261,80 @@ always @(posedge clk) begin
             state <= STATE_RTI_0;
         end
 		  
-	  
-      STATE_TEST_BITS:
-        begin
-			 flags[FLAG_Z] <= (source[31:0] & regs[Rs][31:0]) == 0;
+			STATE_LDM_0:
+				begin
+//reg_mask
+//fare!					
+            state <= STATE_LDM_1;
+				end
 
-			 
-				result[31:0] <= source[31:0] & ~regs[Rs][31:0];
-          state <= STATE_WRITEBACK_MEM_0;
-        end
-			
+			STATE_LDM_1:
+				begin
+//reg_mask
+
+//fare!					
+            state <= STATE_FETCH_OP_0;
+				end
+
+			STATE_STM_0:
+				begin
+//reg_mask
+
+//fare!					
+            state <= STATE_STM_1;
+				end
+
+			STATE_STM_1:
+				begin
+//reg_mask
+
+//fare!					
+            state <= STATE_FETCH_OP_0;
+				end
+
+			STATE_STEX_0:
+				begin
+          mem_bus_enable <= 1;
+          mem_write_enable <= 1;
+					mem_address <= ssp-4;
+					ssp <= ssp - 4;
+						
+          case (immediate_count)
+            0: mem_write[31:0] <= excep_code[4:0];
+            1: mem_write[31:0] <= excep_pc[31:0];
+            2: mem_write[31:0] <= excep_addr[31:0];
+            3: mem_write[31:0] <= excep_state[3:0];
+          endcase
+
+          immediate_count <= immediate_count + 3'd1;
+          state <= STATE_STEX_1;
+				end
+
+			STATE_STEX_1:
+				begin
+          mem_write_enable <= 0;
+          mem_bus_enable <= 0;
+
+//fare!					
+        if (immediate_count == 4)
+          state <= STATE_FETCH_OP_0;
+				else
+          state <= STATE_STEX_0;
+				end
+
+
+`ifdef USA_DSP
+			STATE_VMA_0:
+				begin
+
+					regs[Imm8] <= regs[Imm8] - 1;
+					if (regs[Imm8])
+            state <= STATE_FETCH_OP_0;
+					else
+            state <= STATE_FETCH_OP_0;
+				end
+`endif
+	  
       STATE_ERROR:
         begin
           state <= STATE_ERROR;
@@ -1990,7 +2342,18 @@ always @(posedge clk) begin
           mem_write_enable <= 0;
         end
 		  
-      STATE_EXCEPTION,STATE_HALTED:
+      STATE_EXCEPTION:
+				begin
+          //excep_state[7:0];
+          excep_addr[31:0] <= ea_indirectS[31:0];			// finire!
+          excep_pc[31:0] <= regs[31][31:0];
+          //excep_code[7:0];
+					flags[FLAG_CPUMODE+1:FLAG_CPUMODE] <= MODE_SVC;
+					irq_or_trap <= 1;
+					state <= STATE_IRQ_0;
+				end
+
+			STATE_HALTED:
         begin
           if(button_halt) begin
             state <= STATE_FETCH_OP_0;
@@ -2005,26 +2368,32 @@ always @(posedge clk) begin
 		  
       STATE_IRQ_0:		// opp. unire con STATE_PUSH come in JSR
         begin
-          mem_address <= flag_cpumode==MODE_SVC ? ssp : usp;
+          if (flag_cpumode==MODE_SVC) begin
+						mem_address <= ssp - 4;
+	          ssp <= ssp - 4;
+					end
+					else begin
+						mem_address <= usp - 4;
+	          ssp <= ssp - 4;
+					end
           mem_bus_enable <= 1;
           mem_write_enable <= 1;
           immediate_count <= immediate_count + 4'd4;
           case (immediate_count)
-            0: mem_write[31:0] <= regs[31][31:0];
-            4: mem_write[31:0] <= flags[31:0];
+            4: mem_write[31:0] <= regs[31][31:0];
+            8: mem_write[31:0] <= flags[31:0];
 
 								// SALVARE WP?!
 
           endcase
 
-          ssp <= ssp - 4;
           state <= STATE_IRQ_1;
         end
 		  
       STATE_IRQ_1:
         begin
-          mem_bus_enable <= 0;
           mem_write_enable <= 0;
+          mem_bus_enable <= 0;
 
           if (immediate_count == size_imm) begin
             state <= STATE_FETCH_OP_0;
@@ -2033,9 +2402,26 @@ always @(posedge clk) begin
 						// SALVARE WP?!
             wp <= 32'h00000304 | (IRQlevel << 3);
 
-            regs[31] <= 32'h00000300 | (IRQlevel << 3);
-            mem_address <= 32'h00000300 | (IRQlevel << 3);
-						instruction <= 8'h4c;		// non 6c... strano
+						case (irq_or_trap) 
+							1: begin		// Eccezioni
+//								regs[31] <= 32'h00000010 | (Imm8 << 3);
+								regs[31] <= 32'h00000010 | (Imm8 << 3);
+								end
+							2: begin		// TRAP
+//								regs[31] <= 32'h00000100 | (Imm8[5:0] << 3);
+								regs[31] <= 32'h00000100 | (Imm8[5:0] << 3);
+								mem_address <= 32'h00000100 | (Imm8[5:0] << 3);
+								end
+							3: begin		// XOP
+								regs[31] <= temp;
+								end
+							0: begin		// IRQ
+//								regs[31] <= 32'h00000300 | (IRQlevel << 3);
+								regs[31] <= 32'h00000300 | (IRQlevel << 3);
+								end
+						endcase
+						instruction <= 32'h80880000;		// JMP, INDEXED, Rd=0
+						size_imm <= 4'd4;
 						state <= STATE_DECODE;
 					end
           else
