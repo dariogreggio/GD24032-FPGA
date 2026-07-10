@@ -116,6 +116,7 @@ reg [31:0] ea_indirectD;
 // pc ï¿½ regs[31] ma ho paura che appesantisca... e in fondo non ha molto senso, magari mettere a parte
 // tra l'altro, il pc dovrebbe essere 64 bit!
 
+wire [2:0] Reg3;
 wire [7:0] Imm8;
 wire [2:0] Mm;
 wire [4:0] Rs;
@@ -127,6 +128,7 @@ wire [1:0] size_m;	// questo Ã¨ 0..3 ossia SIZE_8 ecc
 wire IsCond;
 wire DoFlags;
 wire [6:0] Opcode;
+assign Reg3 = instruction[2:0];
 assign Imm8 = instruction[7:0];
 assign Mm  = instruction[2:0];
 assign Rs = instruction[7:3];
@@ -147,7 +149,7 @@ assign RotateCnt = instruction[6:3];
 
 // Used for ALU.
 reg [MAX_OPERAND_SIZE-1:0] source;		// 
-reg [MAX_OPERAND_SIZE-1:0] temp;
+reg [MAX_OPERAND_SIZE /*-1*/:0] temp;		// serve extra bit per rotate
 reg [MAX_OPERAND_SIZE:0] result;
 reg wb;
 reg is_sub;
@@ -395,22 +397,27 @@ parameter OP_RETI   = 7'h76;
 parameter OP_XOP    = 7'h7e;
 parameter OP_HALT   = 7'h7f;
 
-parameter MODE_USER=0;
-parameter MODE_FIQ=1;
-parameter MODE_IRQ=2;
-parameter MODE_SVC=3;
+parameter MODE_USER=2'd0;
+parameter MODE_FIQ=2'd1;
+parameter MODE_IRQ=2'd2;
+parameter MODE_SVC=2'd3;
 
-parameter TRAP_BUS_ERROR=0;
-parameter TRAP_ADDRESS_ERROR=1;
-parameter TRAP_ADDRESS_ERROR2=2;
-parameter TRAP_ILLEGAL_OPCODE=3;
-parameter TRAP_DIVIDE_BY_ZERO=4;
-parameter TRAP_OUT_OF_BOUNDS=5;
-parameter TRAP_OVERFLOW=6;
-parameter TRAP_PRIVILEGE_VIOLATION=7;
-parameter TRAP_IOPL_VIOLATION=8;
-parameter TRAP_TRACE=9;
-parameter TRAP_LAST=30;
+parameter TRAP_BUS_ERROR=5'd0;
+parameter TRAP_ADDRESS_ERROR=5'd1;
+parameter TRAP_ADDRESS_ERROR2=5'd2;				// occhio verificare con Sim !
+parameter TRAP_ILLEGAL_OPCODE=5'd3;
+parameter TRAP_DIVIDE_BY_ZERO=5'd4;
+parameter TRAP_OUT_OF_BOUNDS=5'd5;
+parameter TRAP_OVERFLOW=5'd6;
+parameter TRAP_PRIVILEGE_VIOLATION=5'd7;
+parameter TRAP_IOPL_VIOLATION=5'd8;
+parameter TRAP_TRACE=5'd9;
+parameter TRAP_LAST=5'd30;
+
+parameter TRAP_IRQ_LEVEL=4'd6;
+parameter XOP_IRQ_LEVEL=4'd6;
+
+parameter IRQ_BUTTON_0=4'd1;		// define per questi non va Â£$%#
 
 
     // ================== Multiplexing 7-Segmenti ==================
@@ -499,11 +506,13 @@ always @(posedge clk) begin
 						wp <= 32'h00000008;		// leggere da ram!
 
 						
-						instruction <= 32'h80880000;		// JMP, INDEXED, Rd=0;		
+/* provare, come irq/trap
+						ea_indirectD <= 32'h00000004;
+						instruction <= 32'h80880000;		// JMP, INDEXED, Rd=0
 						size_imm <= 4'd4;
-						state <= STATE_DECODE;
+						state <= STATE_EXECUTE_1_0 //STATE_DECODE;
+						*/
 
-						
 						
 						flags <= 32'h06000000;		// per ora...
 						regs[31] <= 32'h00000500;
@@ -539,6 +548,7 @@ always @(posedge clk) begin
           wb <= 1;
 
 //					if (regs[31][1:0] || ssp[1:0] || usp[1:0]) begin				METTERE? o fare diversamente?
+//											excep_code <= TRAP_ADDRESS_ERROR;
 //						state <= STATE_EXCEPTION;
 //					end
 
@@ -549,10 +559,16 @@ always @(posedge clk) begin
           mem_bus_enable <= 1;
 			 
 				  if(!button_irq) begin
-						size_imm <= 8;		// 2 dword da salvare
-						immediate_count <= 0;
-						IRQlevel=1;
-						state <= STATE_IRQ_0;
+						if (IRQ_BUTTON_0 < flag_irqmask) begin
+
+							size_imm <= 8;		// 2 dword da salvare
+	//						immediate_count <= 0;
+							IRQlevel <= IRQ_BUTTON_0;
+							irq_or_trap <= 0;
+							state <= STATE_IRQ_0;
+						end
+						else
+							state <= STATE_FETCH_OP_1;
 					end
 					else
 						state <= STATE_FETCH_OP_1;
@@ -566,6 +582,7 @@ always @(posedge clk) begin
 					
 					if((Opcode==7'h70 || Opcode==7'h72 || Opcode==7'h76 || Opcode==7'h7f) && flag_cpumode<MODE_SVC) begin
 						// eccezione!
+						excep_code <= TRAP_PRIVILEGE_VIOLATION;
 						state <= STATE_EXCEPTION;
 					end
 					if(Opcode == OP_CLR || Opcode == OP_SET || Opcode == OP_SE || Opcode == OP_DAA
@@ -739,33 +756,45 @@ always @(posedge clk) begin
 									if (MAX_ADDRESS_SIZE==64) begin
 										if (flag_addr64)
 											indirect_total <= 2;
-										else
+										else begin
+											excep_code <= TRAP_ILLEGAL_OPCODE;
 											state <= STATE_EXCEPTION;
 										end
-									else
+									end
+									else begin
+										excep_code <= TRAP_ILLEGAL_OPCODE;
 										state <= STATE_EXCEPTION;
+									end
 								end
 							MODE_INDIRECT64_POSTINC:
 								begin
 									if (MAX_ADDRESS_SIZE==64) begin
 										if (flag_addr64)
 											indirect_total <= 2;
-										else
+										else begin
+											excep_code <= TRAP_ILLEGAL_OPCODE;
 											state <= STATE_EXCEPTION;
 										end
-									else
+									end
+									else begin
+										excep_code <= TRAP_ILLEGAL_OPCODE;
 										state <= STATE_EXCEPTION;
+									end
 								end
 							MODE_INDIRECT64_2_REG:
 								begin
 									if (MAX_ADDRESS_SIZE==64) begin
 										if (flag_addr64)
 											indirect_total <= 2;
-										else
+										else begin
+											excep_code <= TRAP_ILLEGAL_OPCODE;
 											state <= STATE_EXCEPTION;
 										end
-									else
+										end
+									else begin
+										excep_code <= TRAP_ILLEGAL_OPCODE;
 										state <= STATE_EXCEPTION;
+									end
 								end
 						endcase
 					end
@@ -774,20 +803,17 @@ always @(posedge clk) begin
 						// creare un Opcode senza LSB per fare meglio i confronti?
 							|| Opcode == OP_SWAP
 							|| Opcode == OP_RDTS || Opcode == OP_CPUID || Opcode == OP_INC || Opcode == OP_DEC
-							|| Opcode == OP_NEG || Opcode == OP_NOT || Opcode == OP_ABS
+							|| Opcode == OP_NEG || Opcode == OP_NOT || Opcode == OP_ABS || Opcode == OP_ROT
 							|| Opcode == OP_JMP || Opcode == OP_DJNZ || Opcode == OP_CALL || Opcode == OP_BLWP
 							|| Opcode == OP_RET || Opcode == OP_POP || Opcode == OP_LDM
 							|| Opcode == OP_STM || Opcode == OP_STST || Opcode == OP_STSP
 							) begin
 							state <= STATE_EXECUTE_2_0;
 							end 
-						else if(Opcode == OP_ROT) begin
-							state <= STATE_EXECUTE_3_0;
-							end 
 						else if(Opcode == OP_B) begin
 						  if (condIsOk(Cond)) begin
 								regs[31][31:0] <= $signed(regs[31][31:0]) + $signed( { Branch,2'd0 } );
-								end
+							end
 							state <= STATE_FETCH_OP_0;
 							end
 						else if(Opcode == OP_POP) begin
@@ -801,9 +827,7 @@ always @(posedge clk) begin
 							if (!Imm8[7] || flag_ov) begin		// TRAPV
 								immediate_count <= 0;
 								size_imm <= 4'd8;
-//								result[31:0] <= regs[31][31:0];
 //									regs[31] <= 32'h00000100 | (Imm8[5:0] << 3);
-								// FARE INDIREZIONE!!
 
 								// SALVARE WP?!
 								wp <= 32'h00000104 | (Imm8 << 3);
@@ -918,7 +942,7 @@ always @(posedge clk) begin
 						state <= STATE_PUSH_0;
 					end
 					else if(Opcode == OP_LDIM) begin
-						IRQlevel[4:0] <= source[4:0];
+						flags[31:FLAG_IRQMASK] <= source[4:0];
 						state <= STATE_FETCH_OP_0;
 					end
 					else if(Opcode == OP_LDSP) begin
@@ -935,10 +959,14 @@ always @(posedge clk) begin
 						state <= STATE_FETCH_OP_0;
 					end
 					else if(Opcode == OP_LDST) begin
-						if(flag_cpumode==MODE_SVC)
-							flags[31:0] <= source[31:0];
+						if(flag_cpumode==MODE_SVC) begin
+							case (size_m)
+								SIZE_8:  flags[7:0] <= source[7:0];
+								default: flags[31:0] <= source[31:0];
+							endcase
+						end
 						else
-							flags[7:0] <= source[7:0];
+							flags[7:0] <= source[7:0]; // ev. eccezione se size>8
 						state <= STATE_FETCH_OP_0;
 					end
 					else if(Opcode == OP_HALT) begin
@@ -1080,33 +1108,45 @@ always @(posedge clk) begin
 									if (MAX_ADDRESS_SIZE==64) begin
 										if (flag_addr64)
 											;
-										else
+										else begin
+											excep_code <= TRAP_ILLEGAL_OPCODE;
 											state <= STATE_EXCEPTION;
 										end
-									else
+									end
+									else begin
+										excep_code <= TRAP_ILLEGAL_OPCODE;
 										state <= STATE_EXCEPTION;
+									end
 								end
 							MODE_INDIRECT64_POSTINC:
 								begin
 									if (MAX_ADDRESS_SIZE==64) begin
 										if (flag_addr64)
 											;
-										else
+										else begin
+											excep_code <= TRAP_ILLEGAL_OPCODE;
 											state <= STATE_EXCEPTION;
 										end
-									else
+									end
+									else begin
+										excep_code <= TRAP_ILLEGAL_OPCODE;
 										state <= STATE_EXCEPTION;
+									end
 								end
 							MODE_INDIRECT64_2_REG:
 								begin
 									if (MAX_ADDRESS_SIZE==64) begin
 										if (flag_addr64)
 											;
-										else
+										else begin
+											excep_code <= TRAP_ILLEGAL_OPCODE;
 											state <= STATE_EXCEPTION;
 										end
-									else
+										end
+									else begin
+										excep_code <= TRAP_ILLEGAL_OPCODE;
 										state <= STATE_EXCEPTION;
+									end
 								end
 						endcase
 
@@ -1244,7 +1284,25 @@ always @(posedge clk) begin
 							result <= temp & ~(1 << source[5:0]);
             OP_DAA:
 							begin
-							
+	/*						        case BYTE_SIZE:
+          res3.w.l;
+          i=_status.CCR.Carry;
+          _status.CCR.Carry=0;
+          if((res2.b.l & 0xf) > 9 || _status.CCR.HalfCarry) {
+            res3.w.l+=6;
+            res2.b.l=res3.b.l;
+            _status.CCR.Carry= i || HIBYTE(res3.w.l);
+            _status.CCR.HalfCarry=1;
+            }
+          else
+            _status.CCR.HalfCarry=0;
+          if((res2.b.l>0x99) || i) {
+            res2.b.l+=0x60;  
+            _status.CCR.Carry=1;
+            }
+          else
+            _status.CCR.Carry=0;
+*/
 							end
             OP_EX:
 							begin
@@ -1339,12 +1397,12 @@ always @(posedge clk) begin
             OP_CMP,OP_CMPS:
               begin
 								case (size_m)
-									SIZE_8: result[8:0] <= source[7:0] - temp[7:0];
-									SIZE_16: result[16:0] <= source[15:0] - temp[15:0];
-									SIZE_32: result[32:0] <= source[31:0] - temp[31:0];
+									SIZE_8: result[8:0] <= temp[7:0] - source[7:0];
+									SIZE_16: result[16:0] <= temp[15:0] - source[15:0];
+									SIZE_32: result[32:0] <= temp[31:0] - source[31:0];
 									SIZE_64: begin
 										if (MAX_OPERAND_SIZE==64) begin
-											result[64:0] <= source[31:0] - temp[31:0];		// FINIRE
+											result[64:0] <= temp[31:0] - source[31:0];		// FINIRE
 										end
 										else
 											;
@@ -1376,27 +1434,35 @@ always @(posedge clk) begin
               begin
 								case (size_m)
 									SIZE_8: begin 
-										if (!temp[7:0])
+										if (!temp[7:0]) begin
+											excep_code <= TRAP_DIVIDE_BY_ZERO;
 											state <= STATE_EXCEPTION;
+										end
 										else
 											result[8:0] <= source[7:0] / temp[7:0];
 										end
 									SIZE_16:  begin 
-										if (!temp[15:0])
+										if (!temp[15:0]) begin
+											excep_code <= TRAP_DIVIDE_BY_ZERO;
 											state <= STATE_EXCEPTION;
+										end
 										else
 											result[16:0] <= source[15:0] / temp[15:0];
 										end
 									SIZE_32:  begin 
-										if (!temp[31:0])
+										if (!temp[31:0]) begin
+											excep_code <= TRAP_DIVIDE_BY_ZERO;
 											state <= STATE_EXCEPTION;
+										end
 										else
 											result[32:0] <= source[31:0] / temp[31:0];
 										end
 									SIZE_64: begin
 										if (MAX_OPERAND_SIZE==64) begin
-											if (!temp[31:0])
+											if (!temp[31:0]) begin
+												excep_code <= TRAP_DIVIDE_BY_ZERO;
 												state <= STATE_EXCEPTION;
+											end
 											else
 												result[64:0] <= source[31:0] / temp[31:0];		// FINIRE
 										end
@@ -1428,27 +1494,35 @@ always @(posedge clk) begin
               begin
 								case (size_m)
 									SIZE_8: begin 
-										if (!temp[7:0])
+										if (!temp[7:0]) begin
+											excep_code <= TRAP_DIVIDE_BY_ZERO;
 											state <= STATE_EXCEPTION;
+										end
 										else
 											result[8:0] <= $signed(source[7:0]) / $signed(temp[7:0]);
 										end
 									SIZE_16: begin 
-										if (!temp[15:0])
+										if (!temp[15:0]) begin
+											excep_code <= TRAP_DIVIDE_BY_ZERO;
 											state <= STATE_EXCEPTION;
+										end
 										else
 											result[16:0] <= $signed(source[15:0]) / $signed(temp[15:0]);
 										end
 									SIZE_32: begin
-										if (!temp[31:0])
+										if (!temp[31:0]) begin
+											excep_code <= TRAP_DIVIDE_BY_ZERO;
 											state <= STATE_EXCEPTION;
+										end
 										else
 											result[32:0] <= $signed(source[31:0]) / $signed(temp[31:0]);
 										end
 									SIZE_64: begin
 										if (MAX_OPERAND_SIZE==64) begin
-											if (!temp[31:0])
+											if (!temp[31:0]) begin
+												excep_code <= TRAP_DIVIDE_BY_ZERO;
 												state <= STATE_EXCEPTION;
+											end
 											else
 												result[64:0] <= $signed(source[31:0]) / $signed(temp[31:0]);		// FINIRE
 										end
@@ -1460,14 +1534,103 @@ always @(posedge clk) begin
                 affects_ov <= 1;
               end
 
+						OP_INC,OP_DEC,OP_ROT:
+							begin
+								state <= STATE_EXECUTE_3_0;		// UNIRE per risparmiare un ciclo
+							end
+
             OP_BINS:
 							begin
+/*      { uint32_t k; uint8_t bs,bn; int32_t mask;
+
+      if(!Pipe1.opcode.reg3) {		// se 000... quindi posso usare i registri da 1 a 7 al posto di imm32
+// oppure...				if(Pipe1.opcode.o3.condiz) // altro significato dunque! ma non mi piace molto...
+        GetNextPipe(_pc);
+        _pc+=4;
+        k=Pipe2.d;
+        }
+      else {
+        k=regs->r[Pipe1.opcode.reg3].d;
+        }
+
+
+      bs=LOBYTE(LOWORD(k)) & 31; bn=HIBYTE(LOWORD(k)) & 31;	mask=0x00000001;	// fare 64...
+      if(!bn)
+        bn=32;
+      res1.d <<= bs;
+//				bn = 31-bn-bs;
+      mask <<= bs;
+      while(--bn) {
+        uint32_t oldmask=mask;
+        mask <<= 1;
+        mask |= oldmask;
+        }
+      res3.d=res2.d;
+      res3.d &= ~mask;
+      res3.d |= res1.d;
+      // FARE/GESTIRE "copri" gli altri bit oppure no? (con/senza sign-extend)?? v. ARM
+      if(HIWORD(k) & 0x4000) {		// b30 per "copri"/fill/extend altri bit
+        res2.d &= mask;
+        res3.d |= res2.d;
+        if(HIWORD(k) & 0x8000) {		// b31 per sign-extend
+          if(res3.d & (1 << (HIBYTE(LOWORD(k)) & 31)-1))
+            res3.d |= mask;
+          }
+
+        }*/
               end
             OP_BXTR:
 							begin
+      /* uint32_t k; uint8_t bs,bn; int32_t mask;
+
+      if(!Pipe1.opcode.reg3) {		// se 000... quindi posso usare i registri da 1 a 7 al posto di imm32
+// oppure...				if(Pipe1.opcode.o3.condiz) // altro significato dunque! ma non mi piace molto...
+        GetNextPipe(_pc);
+        _pc+=4;
+        k=Pipe2.d;
+        }
+      else {
+        k=regs->r[Pipe1.opcode.reg3].d;
+        }
+
+      bs=LOBYTE(LOWORD(k)) & 31; bn=HIBYTE(LOWORD(k)) & 31;	mask=0x80000000;	// fare 64...
+      if(!bn)
+        bn=32;
+      res3.d=res1.d >> bs;
+      bn = 31-bn;		
+      while(bn--)
+        mask >>= 1;
+      res3.d &= ~mask;
+      if(HIWORD(k) & 0x8000) {		// b31 per sign-extend
+        if(res3.d & (1 << (HIBYTE(LOWORD(k)) & 31)-1))
+          res3.d |= mask;
+        }*/
               end
             OP_BSFR:
 							begin
+      /* uint8_t k; uint8_t dir,type; int32_t mask;
+
+      dir=regs->r[Pipe1.opcode.reg3].d & 1; type=regs->r[Pipe1.opcode.reg3].d & 2 ? 1 : 0;
+			k=0;
+			if(!dir) {			// LSB to MSB (default)
+				mask=0x00000001;
+				do {
+					if((res1.d & mask ? 1 : 0) == type)
+						break;
+					k++;
+					mask <<= 1;
+					} while(mask);
+				}
+			else {				// MSB to LSB
+				mask=0x80000000;
+				do {
+					if((res1.d & mask ? 1 : 0) == type)
+						break;
+					k++;
+		      mask >>= 1;
+					} while(mask);
+				}
+      res3.d=k;*/
               end
 
             OP_STST:
@@ -1475,7 +1638,7 @@ always @(posedge clk) begin
             OP_STSP:
 							case (instruction[5:3]) 
 								0: result[MAX_ADDRESS_SIZE-1:0] <= wp[MAX_ADDRESS_SIZE-1:0];			// STWP
-								1: if(flag_cpumode==MODE_SVC) begin					 // STST
+								1: if(flag_cpumode>=MODE_IRQ) begin					 // STST; in IRQ uso ssp
 										result[MAX_ADDRESS_SIZE-1:0] <= ssp;
 									end
 									else begin
@@ -1504,7 +1667,7 @@ always @(posedge clk) begin
 								result[31:0] <= regs[Rd][31:0];
 								if (MAX_ADDRESS_SIZE)
 									;
-								if(flag_cpumode==MODE_SVC) begin
+								if(flag_cpumode>=MODE_IRQ) begin		// in IRQ uso ssp
 									regs[Rd] <= ssp;
 									ssp[MAX_ADDRESS_SIZE-1:0] <= ssp[MAX_ADDRESS_SIZE-1:0] - source[31:0];
 								end
@@ -1516,7 +1679,7 @@ always @(posedge clk) begin
 							end
             OP_LEAVE:
 							begin
-								if(flag_cpumode==MODE_SVC) begin
+								if(flag_cpumode>=MODE_IRQ) begin		// idem
 									ssp <= regs[Rd];
 								end
 								else begin
@@ -1528,21 +1691,29 @@ always @(posedge clk) begin
 							begin
 								case (size_m)
 									SIZE_8: begin 
-										if (temp[7:0] < 0 || temp[7:0] > source[7:0])
+										if (temp[7:0] < 0 || temp[7:0] > source[7:0]) begin
+											excep_code <= TRAP_OUT_OF_BOUNDS;
 											state <= STATE_EXCEPTION;
+											end
 										end
 									SIZE_16: begin 
-										if (temp[15:0] < 0 || temp[15:0] > source[15:0])
+										if (temp[15:0] < 0 || temp[15:0] > source[15:0]) begin
+											excep_code <= TRAP_OUT_OF_BOUNDS;
 											state <= STATE_EXCEPTION;
+											end
 										end
 									SIZE_32: begin
-										if (temp[31:0] < 0 || temp[31:0] > source[31:0])
+										if (temp[31:0] < 0 || temp[31:0] > source[31:0]) begin
+											excep_code <= TRAP_OUT_OF_BOUNDS;
 											state <= STATE_EXCEPTION;
+											end
 										end
 									SIZE_64: begin
 										if (MAX_OPERAND_SIZE==64) begin
-											if (temp[63:0] < 0 || temp[63:0] > source[63:0])
+											if (temp[63:0] < 0 || temp[63:0] > source[63:0]) begin
+												excep_code <= TRAP_OUT_OF_BOUNDS;
 												state <= STATE_EXCEPTION;
+												end
 											end
 										else
 											;
@@ -1578,9 +1749,9 @@ always @(posedge clk) begin
 											else
 												result[7:0] <= result[7:0] * result[7:0];
 											if (Opcode == OP_MAS)
-												result[7:0] <= result[7:0] + regs[Imm8][7:0];
+												result[7:0] <= result[7:0] + regs[Reg3][7:0];
 											else
-												result[7:0] <= result[7:0] - regs[Imm8][7:0];
+												result[7:0] <= result[7:0] - regs[Reg3][7:0];
 										end
 									SIZE_16:
 										begin
@@ -1594,9 +1765,9 @@ always @(posedge clk) begin
 											else
 												result[15:0] <= result[15:0] * result[15:0];
 											if (Opcode == OP_MAS)
-												result[15:0] <= result[15:0] + regs[Imm8][15:0];
+												result[15:0] <= result[15:0] + regs[Reg3][15:0];
 											else
-												result[15:0] <= result[15:0] - regs[Imm8][15:0];
+												result[15:0] <= result[15:0] - regs[Reg3][15:0];
 										end
 									SIZE_32:
 										begin
@@ -1610,9 +1781,9 @@ always @(posedge clk) begin
 											else
 												result[31:0] <= result[31:0] * result[31:0];
 											if (Opcode == OP_MAS)
-												result[31:0] <= result[31:0] + regs[Imm8][31:0];
+												result[31:0] <= result[31:0] + regs[Reg3][31:0];
 											else
-												result[31:0] <= result[31:0] - regs[Imm8][31:0];
+												result[31:0] <= result[31:0] - regs[Reg3][31:0];
 										end
 									SIZE_64: begin
 										if (MAX_OPERAND_SIZE==64) begin
@@ -1625,9 +1796,9 @@ always @(posedge clk) begin
 											else
 												result[63:0] <= result[63:0] * result[63:0];
 											if (Opcode == OP_MAS)
-												result[63:0] <= result[63:0] + regs[Imm8][63:0];
+												result[63:0] <= result[63:0] + regs[Reg3][63:0];
 											else
-												result[63:0] <= result[63:0] - regs[Imm8][63:0];
+												result[63:0] <= result[63:0] - regs[Reg3][63:0];
 										end
 										else
 											;
@@ -1644,7 +1815,7 @@ always @(posedge clk) begin
 											result[7:0] <= source[7:0]*source[7:0];
 											if (source[7:0]) begin
 												if (instruction[21]) 			// sarebbe Condiz
-													result[7:0] <= result[7:0] + regs[Imm8][7:0]*regs[Imm8][7:0];
+													result[7:0] <= result[7:0] + regs[Reg3][7:0]*regs[Reg3][7:0];
 											end
 											result[7:0] <= result[7:0] + temp[7:0];
 										end
@@ -1653,7 +1824,7 @@ always @(posedge clk) begin
 											result[15:0] <= source[15:0]*source[15:0];
 											if (source[15:0]) begin
 												if (instruction[21]) 			// sarebbe Condiz
-													result[15:0] <= result[15:0] + regs[Imm8][15:0]*regs[Imm8][15:0];
+													result[15:0] <= result[15:0] + regs[Reg3][15:0]*regs[Reg3][15:0];
 											end
 											result[15:0] <= result[15:0] + temp[15:0];
 										end
@@ -1662,7 +1833,7 @@ always @(posedge clk) begin
 											result[31:0] <= source[31:0]*source[31:0];
 											if (source[31:0]) begin
 												if (instruction[21]) 			// sarebbe Condiz
-													result[31:0] <= result[31:0] + regs[Imm8][31:0]*regs[Imm8][31:0];
+													result[31:0] <= result[31:0] + regs[Reg3][31:0]*regs[Reg3][31:0];
 											end
 											result[31:0] <= result[31:0] + temp[31:0];
 										end
@@ -1671,7 +1842,7 @@ always @(posedge clk) begin
 											result[63:0] <= source[63:0]*source[63:0];
 											if (source[63:0]) begin
 												if (instruction[21]) 			// sarebbe Condiz
-													result[63:0] <= result[63:0] + regs[Imm8][63:0]*regs[Imm8][63:0];
+													result[63:0] <= result[63:0] + regs[Reg3][63:0]*regs[Reg3][63:0];
 											end
 											result[63:0] <= result[63:0] + temp[63:0];
 										end
@@ -1718,6 +1889,7 @@ always @(posedge clk) begin
 						OP_DJNZ:
 							begin
 								state <= STATE_EXECUTE_3_0;	// vado a eseguire DEC! ma forse ï¿½ sbagliato.. deve riscrivere su S e non su D
+								// UNIRE per risparmiare un ciclo
 							end
 						OP_SKIP:
 							begin
@@ -1768,10 +1940,14 @@ always @(posedge clk) begin
 							end
 						OP_RETI:
 							begin
-								if (flag_cpumode<MODE_SVC)
+								if (flag_cpumode<MODE_IRQ) begin
+									excep_code <= TRAP_PRIVILEGE_VIOLATION;
 									state <= STATE_EXCEPTION;
-								flags[FLAG_TRAP] <= 0;
-								state <= STATE_RTI_0;
+								end
+								else begin
+				          size_imm <= 8;
+									state <= STATE_RTI_0;
+								end
 							end
 						OP_XOP:		// VERIFICARE e inserire sopra!
 							begin
@@ -1804,14 +1980,14 @@ always @(posedge clk) begin
 					case (Opcode)
 						OP_ROT:
 							begin
-								if(Rs[4])		// 
-									rotate_count = RotateCnt;
-								else
-									rotate_count = regs[Rs[3:0]][5:0];
-									// gestire 64bit!!?
-								if(!rotate_count)
-									rotate_count <= 63;    // gestire 64bit!!?
+								reg [5:0] new_count;
+
+								new_count = (Rs[4]) ? RotateCnt : regs[Rs[3:0]][5:0];		// qua, su local, = non dà problemi
+    						if (new_count == 0)
+									new_count = 6'd63;
+								rotate_count <= new_count;    // gestire 64bit!!?
 								state <= STATE_EXECUTE_3_1;
+								// si può usare un ciclo for?? grok sconsiglia, ed è prevedibile
 							end
 						OP_DJNZ:
 							begin
@@ -1835,76 +2011,135 @@ always @(posedge clk) begin
 
         end
 		  
-      STATE_EXECUTE_3_1:
+      STATE_EXECUTE_3_1:		// 18
         begin
 
           case (Opcode)
             OP_ROT:
 						begin
+
+	/*					STATE_ROT_LOOP: begin
+    if (shift_count == 0) begin
+        result <= shift_temp;
+        state  <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+    end
+    else begin
+        // Applichiamo gli shift in ordine decrescente (16 ? 8 ? 4 ? 2 ? 1)
+        if (shift_count[4]) begin   // bit 4 ? shift di 16
+            shift_temp  <= do_shift(shift_temp, Mm, size_m, 4'd16);
+            shift_count <= shift_count - 16;
+        end
+        else if (shift_count[3]) begin  // shift di 8
+            shift_temp  <= do_shift(shift_temp, Mm, size_m, 4'd8);
+            shift_count <= shift_count - 8;
+        end
+        else if (shift_count[2]) begin  // shift di 4
+            shift_temp  <= do_shift(shift_temp, Mm, size_m, 4'd4);
+            shift_count <= shift_count - 4;
+        end
+        else if (shift_count[1]) begin  // shift di 2
+            shift_temp  <= do_shift(shift_temp, Mm, size_m, 4'd2);
+            shift_count <= shift_count - 2;
+        end
+        else begin                      // shift di 1
+            shift_temp  <= do_shift(shift_temp, Mm, size_m, 4'd1);
+            shift_count <= shift_count - 1;
+        end
+    end
+end
+*/
+    if (rotate_count == 0) begin
+        result <= temp;
+				affects_c <= 1;
+        state  <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+    end
+    else begin
 							case (Mm)
 								0: begin			// SLA
 									case (size_m)
-										SIZE_8:  result[8:0]  <= { source[7],  source[6:0],  1'b0 };
-										SIZE_16: result[16:0] <= { source[15], source[14:0], 1'b0 };
-										SIZE_32: result[32:0] <= { source[31], source[30:0], 1'b0 };
+										SIZE_8:  temp[8:0]  <= { temp[7],  temp[6:0],  1'b0 };
+										SIZE_16: temp[16:0] <= { temp[15], temp[14:0], 1'b0 };
+										SIZE_32: temp[32:0] <= { temp[31], temp[30:0], 1'b0 };
+										SIZE_64:
+											begin
+												if (MAX_OPERAND_SIZE==64) begin
+												end
+											end
 									endcase
 									end
 								1: begin			// SRA
 									case (size_m)
-										SIZE_8:  result[8:0]  <= { source[0], source[7], source[7:1]  };
-										SIZE_16: result[16:0] <= { source[0], source[15], source[15:1] };
-										SIZE_32: result[32:0] <= { source[0], source[31], source[31:1] };
+										SIZE_8:  temp[8:0]  <= { temp[0], temp[7], temp[7:1]  };
+										SIZE_16: temp[16:0] <= { temp[0], temp[15], temp[15:1] };
+										SIZE_32: temp[32:0] <= { temp[0], temp[31], temp[31:1] };
+										SIZE_64:
+											begin
+												if (MAX_OPERAND_SIZE==64) begin
+												end
+											end
 									endcase
 									end
 								2: begin			// SRL
 									case (size_m)
-										SIZE_8:  result[8:0]  <= { source[0], 1'b0, source[7:1]  };
-										SIZE_16: result[16:0] <= { source[0], 1'b0, source[15:1] };
-										SIZE_32: result[32:0] <= { source[0], 1'b0, source[31:1] };
+										SIZE_8:  temp[8:0]  <= { temp[0], 1'b0, temp[7:1]  };
+										SIZE_16: temp[16:0] <= { temp[0], 1'b0, temp[15:1] };
+										SIZE_32: temp[32:0] <= { temp[0], 1'b0, temp[31:1] };
+										SIZE_64:
+											begin
+												if (MAX_OPERAND_SIZE==64) begin
+												end
+											end
 									endcase
 									end
 								3: begin			// RR
 									case (size_m)
-										SIZE_8:  result[8:0]  <= { source[0], source[0], source[7:1]  };
-										SIZE_16: result[16:0] <= { source[0], source[0], source[15:1] };
-										SIZE_32: result[32:0] <= { source[0], source[0], source[31:1] };
+										SIZE_8:  temp[8:0]  <= { temp[0], temp[0], temp[7:1]  };
+										SIZE_16: temp[16:0] <= { temp[0], temp[0], temp[15:1] };
+										SIZE_32: temp[32:0] <= { temp[0], temp[0], temp[31:1] };
+										SIZE_64:
+											begin
+												if (MAX_OPERAND_SIZE==64) begin
+												end
+											end
 									endcase
 									end
 								4: begin			// RRC
 									case (size_m)
-										SIZE_8:  result[8:0]  <= { source[0], flag_c, source[7:1]  };
-										SIZE_16: result[16:0] <= { source[0], flag_c, source[15:1] };
-										SIZE_32: result[32:0] <= { source[0], flag_c, source[31:1] };
+										SIZE_8:  temp[8:0]  <= { temp[0], flag_c, temp[7:1]  };
+										SIZE_16: temp[16:0] <= { temp[0], flag_c, temp[15:1] };
+										SIZE_32: temp[32:0] <= { temp[0], flag_c, temp[31:1] };
+										SIZE_64:
+											begin
+											end
 									endcase
 									end
 								5: begin			// RL
 									case (size_m)
-										SIZE_8:  result[8:0]  <= { source[7],  source[6:0],  source[7] };
-										SIZE_16: result[16:0] <= { source[15], source[14:0], source[15] };
-										SIZE_32: result[32:0] <= { source[31], source[30:0], source[31] };
+										SIZE_8:  temp[8:0]  <= { temp[7],  temp[6:0],  temp[7] };
+										SIZE_16: temp[16:0] <= { temp[15], temp[14:0], temp[15] };
+										SIZE_32: temp[32:0] <= { temp[31], temp[30:0], temp[31] };
+										SIZE_64:
+											begin
+											end
 									endcase
 									end
 								6: begin			// RLC
 									case (size_m)
-										SIZE_8:  result[8:0]  <= { source[7],  source[6:0],  flag_c };
-										SIZE_16: result[16:0] <= { source[15], source[14:0], flag_c };
-										SIZE_32: result[32:0] <= { source[31], source[30:0], flag_c };
+										SIZE_8:  temp[8:0]  <= { temp[7],  temp[6:0],  flag_c };
+										SIZE_16: temp[16:0] <= { temp[15], temp[14:0], flag_c };
+										SIZE_32: temp[32:0] <= { temp[31], temp[30:0], flag_c };
+										SIZE_64:
+											begin
+											end
 									endcase
 									end
-								endcase
-								affects_c <= 1;
-								if (rotate_count) begin
-									rotate_count <= rotate_count-6'd1;
-								end
-								else 
-								  begin
-									state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
-								  end
+							endcase
+							rotate_count <= rotate_count - 6'd1;
 							end
+						end
           endcase
-
-
         end
+
 		  
       STATE_WRITEBACK_R:		// 23
         begin
@@ -1927,8 +2162,8 @@ always @(posedge clk) begin
 						state <= STATE_SET_FLAGS_0;
 					else begin
 						if (in_repeat) begin
-							regs[Imm8] <= regs[Imm8] - 1;
-							state <= regs[Imm8] ? STATE_DECODE : STATE_FETCH_OP_0;
+							regs[Reg3] <= regs[Reg3] - 1;
+							state <= regs[Reg3] ? STATE_DECODE : STATE_FETCH_OP_0;
 						end
 						else
 							state <= STATE_FETCH_OP_0;
@@ -2035,8 +2270,8 @@ always @(posedge clk) begin
 							state <= STATE_SET_FLAGS_0;
 						else begin
 							if (in_repeat) begin
-								regs[Imm8] <= regs[Imm8] - 1;
-								state <= regs[Imm8] ? STATE_DECODE : STATE_FETCH_OP_0;
+								regs[Reg3] <= regs[Reg3] - 1;
+								state <= regs[Reg3] ? STATE_DECODE : STATE_FETCH_OP_0;
 							end
 							else
 								state <= STATE_FETCH_OP_0;
@@ -2057,7 +2292,7 @@ always @(posedge clk) begin
 								flags[FLAG_S] <= result[7];
 								if(affects_ov) flags[FLAG_OV] <= temp[7] == (source[7] ^ is_sub) && result[7] != temp[7];
 								flags[FLAG_P] <= parity_gen(temp[7:0]);
-								flags[FLAG_HC] <= 0;
+								flags[FLAG_HC] <= result[4];
 							end
 						SIZE_16:
 							begin
@@ -2065,7 +2300,7 @@ always @(posedge clk) begin
 								flags[FLAG_Z] <= result[15:0] == 0;
 								flags[FLAG_S] <= result[15];
 								if(affects_ov) flags[FLAG_OV] <= temp[15] == (source[15] ^ is_sub) && result[15] != temp[15];
-								flags[FLAG_HC] <= 0;
+								flags[FLAG_HC] <= result[8];
 							end
 						SIZE_32:
 							begin
@@ -2073,7 +2308,7 @@ always @(posedge clk) begin
 								flags[FLAG_Z] <= result[31:0] == 0;
 								flags[FLAG_S] <= result[31];
 								if(affects_ov) flags[FLAG_OV] <= temp[31] == (source[31] ^ is_sub) && result[31] != temp[31];
-								flags[FLAG_HC] <= 0;
+								flags[FLAG_HC] <= result[16];
 							end
 						SIZE_64:
 							begin
@@ -2082,7 +2317,7 @@ always @(posedge clk) begin
 									flags[FLAG_Z] <= result[64:0] == 0;
 									flags[FLAG_S] <= result[64];
 									if(affects_ov) flags[FLAG_OV] <= temp[63] == (source[63] ^ is_sub) && result[63] != temp[63];
-									flags[FLAG_HC] <= 0;
+									flags[FLAG_HC] <= result[32];
 								end
 								else
 									;
@@ -2090,8 +2325,8 @@ always @(posedge clk) begin
 					endcase
 
 					if (in_repeat) begin
-						regs[Imm8] <= regs[Imm8] - 1;
-						state <= regs[Imm8] ? STATE_DECODE : STATE_FETCH_OP_0;
+						regs[Reg3] <= regs[Reg3] - 1;
+						state <= regs[Reg3] ? STATE_DECODE : STATE_FETCH_OP_0;
 					end
 					else
 						state <= STATE_FETCH_OP_0;
@@ -2128,7 +2363,7 @@ always @(posedge clk) begin
         begin
           mem_bus_enable <= 1;
           mem_write_enable <= 1;
-					if(flag_cpumode==MODE_SVC) begin
+					if(flag_cpumode>=MODE_IRQ) begin
 						mem_address <= ssp-4;
 						ssp <= ssp - 4;
 						end
@@ -2175,7 +2410,7 @@ always @(posedge clk) begin
       STATE_POP_0:
         begin
           mem_bus_enable <= 1;
-					if(flag_cpumode==MODE_SVC) begin
+					if(flag_cpumode>=MODE_IRQ) begin
 						mem_address <= ssp;
 						ssp <= ssp + 4;
 						end
@@ -2233,14 +2468,10 @@ always @(posedge clk) begin
 		  
       STATE_RTI_0:
         begin
-					if(flag_cpumode==MODE_SVC) begin
+					//if(flag_cpumode>=MODE_IRQ) begin		// stile 68000 - IRQ in modo user esistono solo dal 286 :) (ristorando i flag mi inculo! invertire o boh
 						mem_address <= ssp;
 						ssp <= ssp + 4;
-						end
-					else begin
-						mem_address <= usp;
-						usp <= usp + 4;
-						end
+//						end
           mem_bus_enable <= 1;
           immediate_count <= immediate_count + 4'd4;
           state <= STATE_RTI_1;
@@ -2327,8 +2558,8 @@ always @(posedge clk) begin
 			STATE_VMA_0:
 				begin
 
-					regs[Imm8] <= regs[Imm8] - 1;
-					if (regs[Imm8])
+					regs[Reg3] <= regs[Reg3] - 1;
+					if (regs[Reg3])
             state <= STATE_FETCH_OP_0;
 					else
             state <= STATE_FETCH_OP_0;
@@ -2366,27 +2597,22 @@ always @(posedge clk) begin
           mem_write_enable <= 0;
         end
 		  
-      STATE_IRQ_0:		// opp. unire con STATE_PUSH come in JSR
+      STATE_IRQ_0:		// // stile 68000 - IRQ in modo user esistono solo dal 286 :) 
         begin
-          if (flag_cpumode==MODE_SVC) begin
+//          if (flag_cpumode==MODE_SVC) begin
 						mem_address <= ssp - 4;
 	          ssp <= ssp - 4;
-					end
-					else begin
-						mem_address <= usp - 4;
-	          ssp <= ssp - 4;
-					end
           mem_bus_enable <= 1;
           mem_write_enable <= 1;
-          immediate_count <= immediate_count + 4'd4;
           case (immediate_count)
-            4: mem_write[31:0] <= regs[31][31:0];
-            8: mem_write[31:0] <= flags[31:0];
+            0: mem_write[31:0] <= regs[31][31:0];
+            4: mem_write[31:0] <= flags[31:0];
 
 								// SALVARE WP?!
 
           endcase
 
+          immediate_count <= immediate_count + 4'd4;
           state <= STATE_IRQ_1;
         end
 		  
@@ -2397,32 +2623,43 @@ always @(posedge clk) begin
 
           if (immediate_count == size_imm) begin
             state <= STATE_FETCH_OP_0;
-//				regs[31] <= 16'hff50;
 				
 						// SALVARE WP?!
             wp <= 32'h00000304 | (IRQlevel << 3);
 
 						case (irq_or_trap) 
 							1: begin		// Eccezioni
-//								regs[31] <= 32'h00000010 | (Imm8 << 3);
-								regs[31] <= 32'h00000010 | (Imm8 << 3);
+								flags[FLAG_CPUMODE+1:FLAG_CPUMODE] <= MODE_SVC;
+								flags[FLAG_TRAP] <= 0;
+//								flags[31:FLAG_IRQMASK] <= TRAP_IRQ_LEVEL; boh qua
+								ea_indirectD <= 32'h00000010 | (excep_code << 3);
 								end
 							2: begin		// TRAP
 //								regs[31] <= 32'h00000100 | (Imm8[5:0] << 3);
-								regs[31] <= 32'h00000100 | (Imm8[5:0] << 3);
-								mem_address <= 32'h00000100 | (Imm8[5:0] << 3);
+								flags[FLAG_CPUMODE+1:FLAG_CPUMODE] <= MODE_SVC;
+								flags[FLAG_TRAP] <= 1;
+								flags[31:FLAG_IRQMASK] <= TRAP_IRQ_LEVEL;
+								if (!Imm8[7])
+									ea_indirectD <= 32'h00000100 | (Imm8[5:0] << 3);
+								else
+									ea_indirectD <= 32'h00000040;
 								end
 							3: begin		// XOP
-								regs[31] <= temp;
+								flags[FLAG_CPUMODE+1:FLAG_CPUMODE] <= MODE_SVC;
+								flags[FLAG_TRAP] <= 0;
+								flags[31:FLAG_IRQMASK] <= XOP_IRQ_LEVEL;
+								ea_indirectD <= temp;
 								end
 							0: begin		// IRQ
-//								regs[31] <= 32'h00000300 | (IRQlevel << 3);
-								regs[31] <= 32'h00000300 | (IRQlevel << 3);
+								flags[FLAG_CPUMODE+1:FLAG_CPUMODE] <= MODE_IRQ;
+								flags[FLAG_TRAP] <= 0;	// sï¿½? 
+								flags[31:FLAG_IRQMASK] <= IRQlevel;
+								ea_indirectD <= 32'h00000300 | (IRQlevel << 3);
 								end
 						endcase
 						instruction <= 32'h80880000;		// JMP, INDEXED, Rd=0
 						size_imm <= 4'd4;
-						state <= STATE_DECODE;
+						state <= STATE_EXECUTE_1_0 /*STATE_DECODE*/;
 					end
           else
             state <= STATE_IRQ_0;
@@ -2449,13 +2686,28 @@ function condIsOk(input [3:0] cond);
 			4'h9: condIsOk = !(flag_c && !flag_z);			// BLS
 			4'ha: condIsOk = flag_s == flag_ov;			// BGE
 			4'hb: condIsOk = flag_s != flag_ov;			// BLT
-			4'hc: condIsOk = flag_z && (flag_s == flag_ov);			// BGT		sbagliato?? cfr 2026 Simulatore
-			4'hd: condIsOk = !(flag_z && (flag_s == flag_ov));			// BLE
+			4'hc: condIsOk = !flag_z && (flag_s == flag_ov);			// BGT
+			4'hd: condIsOk = (flag_z || (flag_s != flag_ov));			// BLE
 			4'he: condIsOk = flag_p;			// BPE
 			4'hf: condIsOk = !flag_p;			// BPO
 	endcase
 endfunction
 
+function [31:0] do_shift;
+    input [31:0] data;
+    input [2:0]  mode;      // Mm
+    input [1:0]  size;
+    input [4:0]  amount;
+    
+    reg [31:0] tmp;
+    begin
+        tmp = data;
+        case (mode)
+					0: ;
+        endcase
+        do_shift = tmp;
+    end
+endfunction
 
 function parity_gen(input [7:0] d);			// https://www.engineersgarage.com/verilog-tutorial-12-how-to-design-8-bit-parity-generator-and-checker-circuits-in-verilog/
 	reg t1,t2,t3,t4,t5,t6;
@@ -2469,6 +2721,47 @@ function parity_gen(input [7:0] d);			// https://www.engineersgarage.com/verilog
 	parity_gen = d[7] ^ t6;
 endfunction
 	
+memory_bus memory_bus_0(
+  .address        (mem_address),
+//	.size						(size_m),		// se lo metto triplica le celle!
+  .data_in        (mem_write),
+  .data_out       (mem_read),
+  .bus_enable     (mem_bus_enable),
+  .write_enable   (mem_write_enable),
+  .bus_halt       (mem_bus_halted),
+  .clk            (clk),
+  .raw_clk        (raw_clk),
+  //.debug          (debug),
+  .reset          (mem_bus_reset)
+);
+
+io_bus io_bus_0(
+  .address        (io_address),
+  .data_in        (io_write),
+  .data_out       (io_read),
+  .bus_enable     (io_bus_enable),
+  .write_enable   (io_write_enable),
+  .clk            (clk),
+  .raw_clk        (raw_clk),
+  .speaker_p      (speaker_p),
+  .speaker_m      (speaker_m),
+//  .ioport_0       (ioport_0),
+  .ioport_0       (ioport_0),
+  .ioport_1       (ioport_1),
+  .ioport_2       (ioport_2),
+  .ioport_3       (ioport_3),
+  .ioport_4       (ioport_4),
+  .button_0       (button_0),
+  .uart_tx_0      (uart_tx_0),
+  .uart_rx_0      (uart_rx_0),
+  //.debug          (debug),
+  .reset          (mem_bus_reset)		// usarne un altro
+);
+
+reg_mode reg_mode_0(
+  .x      (flag_b)
+);
+
 
 always @(posedge raw_clk) begin
   case (mux_state)
@@ -2518,46 +2811,6 @@ end
     endfunction
 
 	 
-memory_bus memory_bus_0(
-  .address        (mem_address),
-  .data_in        (mem_write),
-  .data_out       (mem_read),
-  .bus_enable     (mem_bus_enable),
-  .write_enable   (mem_write_enable),
-  .bus_halt       (mem_bus_halted),
-  .clk            (clk),
-  .raw_clk        (raw_clk),
-  //.debug          (debug),
-  .reset          (mem_bus_reset)
-);
-
-io_bus io_bus_0(
-  .address        (io_address),
-  .data_in        (io_write),
-  .data_out       (io_read),
-  .bus_enable     (io_bus_enable),
-  .write_enable   (io_write_enable),
-  .clk            (clk),
-  .raw_clk        (raw_clk),
-  .speaker_p      (speaker_p),
-  .speaker_m      (speaker_m),
-//  .ioport_0       (ioport_0),
-  .ioport_0       (ioport_0),
-  .ioport_1       (ioport_1),
-  .ioport_2       (ioport_2),
-  .ioport_3       (ioport_3),
-  .ioport_4       (ioport_4),
-  .button_0       (button_0),
-  .uart_tx_0      (uart_tx_0),
-  .uart_rx_0      (uart_rx_0),
-  //.debug          (debug),
-  .reset          (mem_bus_reset)		// usarne un altro
-);
-
-reg_mode reg_mode_0(
-  .x      (flag_b)
-);
-
 endmodule
 
 
