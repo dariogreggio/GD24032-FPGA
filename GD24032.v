@@ -160,8 +160,8 @@ reg affects_ov;
 reg affects_s;		// questo forse non serve
 
 // Used for MOVS ecc
-reg [31:0] block_source;
-reg [31:0] block_destination;
+//reg [31:0] block_source;			// servono davvero?
+//reg [31:0] block_destination;
 
 // Addressing mode.
 reg [1:0] indirect_count;		// # dword
@@ -172,7 +172,24 @@ reg [3:0] push_count;
 reg [3:0] pop_count;		// non ï¿½ mai usato insieme a push, ma se li unifico spreco piï¿½ celle...
 reg [3:0] wb_count;		// 1..8 (arrotondato a dword) (usare per write a 64bit
 reg [1:0] post_count;
+
 reg [31:0] reg_mask;		// per STM/LDM
+reg [31:0] reg_count;		
+
+// per BINS ecc (ottimizzare
+reg [31:0] bit_src;      // sorgente
+reg [31:0] bit_dest;     // destinazione (per BINS)
+reg [31:0] bit_result;
+reg [5:0]  bit_pos;
+reg [5:0]  bit_len;
+reg [5:0]  bit_len_orig;
+reg [5:0]  bit_counter;
+reg        bit_sign_ext;
+reg        bit_fill;        // per BINS "copri"
+reg        search_dir;
+reg        search_type;
+reg [31:0] bbb_type;
+
 
 
 // Flags.
@@ -275,6 +292,12 @@ parameter STATE_EXECUTE_2_1      = 6'd16;
 parameter STATE_EXECUTE_3_0      = 6'd17;
 parameter STATE_EXECUTE_3_1      = 6'd18;
 
+parameter STATE_EXECUTE_4_0      = 6'd50;		// riordinare!
+parameter STATE_EXECUTE_4_1      = 6'd51;
+parameter STATE_EXECUTE_4_2      = 6'd52;
+
+parameter STATE_EXECUTE_5        = 6'd53;
+
 parameter STATE_WRITEBACK_R       = 6'd19;
 
 parameter STATE_WRITEBACK_MEM_P   = 6'd20;
@@ -301,11 +324,13 @@ parameter STATE_POP_WB            = 6'd34;
 parameter STATE_RTI_0             = 6'd35;
 parameter STATE_RTI_1             = 6'd36;
 
-parameter STATE_LDM_0            = 6'd37;
-parameter STATE_LDM_1            = 6'd38;
+parameter STATE_LDM_STM           = 6'd37;
 
-parameter STATE_STM_0            = 6'd39;
-parameter STATE_STM_1            = 6'd40;
+parameter STATE_LDM_0             = 6'd38;
+parameter STATE_LDM_1             = 6'd39;
+
+parameter STATE_STM_0             = 6'd40;
+parameter STATE_STM_1             = 6'd41;
 
 parameter STATE_STEX_0            = 6'd41;
 parameter STATE_STEX_1            = 6'd42;
@@ -383,7 +408,7 @@ parameter OP_PUSH   = 7'h48;
 parameter OP_POP    = 7'h49;
 parameter OP_LDM    = 7'h4c;
 parameter OP_STM    = 7'h4d;
-parameter OP_B		= 7'h50;
+parameter OP_B			= 7'h50;
 parameter OP_DJNZ   = 7'h51;
 parameter OP_SKIP   = 7'h52;
 parameter OP_TRAP   = 7'h6f;
@@ -580,11 +605,6 @@ always @(posedge clk) begin
           mem_bus_enable <= 0;
           instruction = mem_read;		// NON <=
 					
-					if((Opcode==7'h70 || Opcode==7'h72 || Opcode==7'h76 || Opcode==7'h7f) && flag_cpumode<MODE_SVC) begin
-						// eccezione!
-						excep_code <= TRAP_PRIVILEGE_VIOLATION;
-						state <= STATE_EXCEPTION;
-					end
 					if(Opcode == OP_CLR || Opcode == OP_SET || Opcode == OP_SE || Opcode == OP_DAA
 						|| Opcode == OP_SWAP || Opcode == OP_EX || Opcode == OP_INC
 						|| Opcode == OP_DEC || Opcode == OP_NEG || Opcode == OP_NOT || Opcode == OP_ABS
@@ -592,14 +612,27 @@ always @(posedge clk) begin
 						|| Opcode == OP_RET || Opcode == OP_SKIP || Opcode == OP_TRAP 
 						|| Opcode == OP_RTWP || Opcode == OP_HALT) begin
 						if (condIsOk(Cond) == 0) begin
+							reg [4:0] skip_count=0;		// max 16
+
+							if (Td == MODE_INDEXED)
+								skip_count = skip_count + 4;		// gestire addr 64
+
+
+		          regs[31] <= regs[31] + skip_count;
 							state <= STATE_FETCH_OP_0;
 
-						// finire di skippare operandi...
 						end else begin
 							state <= STATE_DECODE;
 						end
 					end else begin
 						state <= STATE_DECODE;
+					end
+
+					// DOPO!
+					if((Opcode==7'h70 || Opcode==7'h72 || Opcode==7'h76 || Opcode==7'h7f) && flag_cpumode<MODE_SVC) begin
+						// eccezione!
+						excep_code <= TRAP_PRIVILEGE_VIOLATION;
+						state <= STATE_EXCEPTION;
 					end
           regs[31] <= regs[31] + 4;
         end
@@ -1009,7 +1042,7 @@ always @(posedge clk) begin
 										state <= STATE_EXECUTE_1_0;
 									end
 								end
-							MODE_IMMEDIATE8:		// ma qua c'ï¿½ o no??
+							MODE_IMMEDIATE8:		// ma qua c'ï¿½ o no?? sì per LDM/STM direi
 								begin
 									temp[7:0] <= Imm8;
 									state <= STATE_EXECUTE_2_1;
@@ -1218,7 +1251,17 @@ always @(posedge clk) begin
 								result <= source;
 								in_repeat <= Opcode[0];
 							end
-            OP_CLR:
+	           OP_XLAT:		// 				// usare condiz per scegliere BYTE o DWORD puntatore..??
+							 begin
+//										if (MAX_OPERAND_SIZE==64) begin
+									if (/*IsCond*/ instruction[21])
+										mem_address <= temp[31:0] + source[31:0] << size_m;		// unsigned
+									else
+										mem_address <= temp[31:0] + source[7:0] << size_m;		// unsigned;
+				          mem_bus_enable <= 1;
+									state <= STATE_EXECUTE_5;
+							 end
+		         OP_CLR:
 							result <= 0;
             OP_SET:
 							result <= ~0;
@@ -1307,22 +1350,33 @@ always @(posedge clk) begin
             OP_EX:
 							begin
 								result[31:0] <= source[31:0];
-
+// serve uno stato speciale, credo...
 							end
             OP_SWAP:
 							begin
-								case (size_m)
-									SIZE_8: result[7:0] <= { source[3:0], source[7:4] } ;
-									SIZE_16: result[15:0] <= { source[7:0], source[15:8] } ;
-									SIZE_32: result[31:0] <= { source[15:0], source[31:16] } ;
-									SIZE_64: begin
-										if (MAX_OPERAND_SIZE==64) begin
-											result[63:0] <= { source[31:0], source[63:32] } ;		// FINIRE
-										end
-										else
-											;
-										end
-								endcase
+								if (instruction[3]) begin		// SWAPR
+									case (size_m)
+										SIZE_32: result[31:0] <= { source[7:0], source[15:8], source[23:16], source[31:24] } ;
+										default: begin
+											excep_code <= TRAP_ILLEGAL_OPCODE;
+											state <= STATE_EXCEPTION;
+											end
+									endcase
+								end
+								else begin
+									case (size_m)
+										SIZE_8: result[7:0] <= { source[3:0], source[7:4] } ;
+										SIZE_16: result[15:0] <= { source[7:0], source[15:8] } ;
+										SIZE_32: result[31:0] <= { source[15:0], source[31:16] } ;
+										SIZE_64: begin
+											if (MAX_OPERAND_SIZE==64) begin
+												result[63:0] <= { source[31:0], source[63:32] } ;		// FINIRE
+											end
+											else
+												;
+											end
+									endcase
+								end
 							end
             OP_ADD:
               begin
@@ -1539,99 +1593,284 @@ always @(posedge clk) begin
 								state <= STATE_EXECUTE_3_0;		// UNIRE per risparmiare un ciclo
 							end
 
-            OP_BINS:
+            OP_BINS,OP_BXTR,OP_BSFR:
 							begin
-/*      { uint32_t k; uint8_t bs,bn; int32_t mask;
-
-      if(!Pipe1.opcode.reg3) {		// se 000... quindi posso usare i registri da 1 a 7 al posto di imm32
-// oppure...				if(Pipe1.opcode.o3.condiz) // altro significato dunque! ma non mi piace molto...
-        GetNextPipe(_pc);
-        _pc+=4;
-        k=Pipe2.d;
-        }
-      else {
-        k=regs->r[Pipe1.opcode.reg3].d;
-        }
-
-
-      bs=LOBYTE(LOWORD(k)) & 31; bn=HIBYTE(LOWORD(k)) & 31;	mask=0x00000001;	// fare 64...
-      if(!bn)
-        bn=32;
-      res1.d <<= bs;
-//				bn = 31-bn-bs;
-      mask <<= bs;
-      while(--bn) {
-        uint32_t oldmask=mask;
-        mask <<= 1;
-        mask |= oldmask;
-        }
-      res3.d=res2.d;
-      res3.d &= ~mask;
-      res3.d |= res1.d;
-      // FARE/GESTIRE "copri" gli altri bit oppure no? (con/senza sign-extend)?? v. ARM
-      if(HIWORD(k) & 0x4000) {		// b30 per "copri"/fill/extend altri bit
-        res2.d &= mask;
-        res3.d |= res2.d;
-        if(HIWORD(k) & 0x8000) {		// b31 per sign-extend
-          if(res3.d & (1 << (HIBYTE(LOWORD(k)) & 31)-1))
-            res3.d |= mask;
-          }
-
-        }*/
+								if (Reg3 == 0) begin
+									mem_address <= ea_indirectS + immediate_count;
+									mem_bus_enable <= 1;
+									regs[31] <= regs[31] + 4;
+								end
+								else
+									bbb_type <= regs[Reg3];
+								
+								state <= STATE_EXECUTE_4_0;		// 
               end
-            OP_BXTR:
-							begin
-      /* uint32_t k; uint8_t bs,bn; int32_t mask;
 
-      if(!Pipe1.opcode.reg3) {		// se 000... quindi posso usare i registri da 1 a 7 al posto di imm32
-// oppure...				if(Pipe1.opcode.o3.condiz) // altro significato dunque! ma non mi piace molto...
-        GetNextPipe(_pc);
-        _pc+=4;
-        k=Pipe2.d;
-        }
-      else {
-        k=regs->r[Pipe1.opcode.reg3].d;
-        }
+/*
+// ==================== Registri da dichiarare nel modulo CPU ====================
+reg [31:0] bit_temp;      // valore su cui lavorare
+reg [31:0] bit_dest;      // destinazione per BINS
+reg [5:0]  bit_counter;   // contatore per loop
+reg [4:0]  bit_pos;       // posizione corrente
+reg [5:0]  bit_len;       // lunghezza (0 = 32)
+reg        bit_sign_ext;
+reg [1:0]  bit_op;        // 0=BXTR, 1=BINS, 2=BSFR
 
-      bs=LOBYTE(LOWORD(k)) & 31; bn=HIBYTE(LOWORD(k)) & 31;	mask=0x80000000;	// fare 64...
-      if(!bn)
-        bn=32;
-      res3.d=res1.d >> bs;
-      bn = 31-bn;		
-      while(bn--)
-        mask >>= 1;
-      res3.d &= ~mask;
-      if(HIWORD(k) & 0x8000) {		// b31 per sign-extend
-        if(res3.d & (1 << (HIBYTE(LOWORD(k)) & 31)-1))
-          res3.d |= mask;
-        }*/
-              end
-            OP_BSFR:
-							begin
-      /* uint8_t k; uint8_t dir,type; int32_t mask;
+// ==================== STATE_BITOP_PREP ====================
+STATE_BITOP_PREP: begin
+    case (Opcode)
+        0x33: begin // BINS - Bit Insert
+            bit_op      <= 2'd1;
+            bit_pos     <= bs;                       // start bit
+            bit_len     <= (bn == 0) ? 6'd32 : bn;
+            bit_temp    <= res1.d;                   // dato da inserire
+            bit_dest    <= res2.d;                   // destinazione originale
+            bit_sign_ext<= (HIWORD(k) & 0x8000) ? 1'b1 : 1'b0;
+            // TODO: gestisci flag "copri" (bit 30 di k)
+        end
 
-      dir=regs->r[Pipe1.opcode.reg3].d & 1; type=regs->r[Pipe1.opcode.reg3].d & 2 ? 1 : 0;
-			k=0;
-			if(!dir) {			// LSB to MSB (default)
-				mask=0x00000001;
-				do {
-					if((res1.d & mask ? 1 : 0) == type)
-						break;
-					k++;
-					mask <<= 1;
-					} while(mask);
-				}
-			else {				// MSB to LSB
-				mask=0x80000000;
-				do {
-					if((res1.d & mask ? 1 : 0) == type)
-						break;
-					k++;
-		      mask >>= 1;
-					} while(mask);
-				}
-      res3.d=k;*/
-              end
+        0x34: begin // BXTR - Bit Extract
+            bit_op      <= 2'd0;
+            bit_pos     <= bs;
+            bit_len     <= (bn == 0) ? 6'd32 : bn;
+            bit_temp    <= res1.d;                   // sorgente
+            bit_sign_ext<= (HIWORD(k) & 0x8000) ? 1'b1 : 1'b0;
+            bit_dest    <= 32'h00000000;             // accumulatore per extract
+        end
+
+        0x35: begin // BSFR - Bit Search
+            bit_op      <= 2'd2;
+            bit_temp    <= res1.d;
+            bit_counter <= 0;
+            // dir e type giï¿½ estratti da reg3
+        end
+    endcase
+    
+    state <= STATE_BITOP_EXEC;
+end
+
+// ==================== STATE_BITOP_EXEC (loop) ====================
+STATE_BITOP_EXEC: begin
+    case (bit_op)
+        2'd0: begin // ==================== BXTR ====================
+            if (bit_len == 0) begin
+                result <= bit_dest;
+                // sign extend
+                if (bit_sign_ext && bit_dest[bit_len-1])   // attenzione: bit_len giï¿½ decrementato
+                    result <= bit_dest | ~((1 << original_bn) - 1);
+                state <= WRITEBACK_STATE;
+            end else begin
+                bit_dest[31 - bit_len] <= bit_temp[bit_pos];  // allineamento a destra (MSB first)
+                bit_pos  <= bit_pos + 1;
+                bit_len  <= bit_len - 1;
+            end
+        end
+
+        2'd1: begin // ==================== BINS ====================
+            if (bit_len == 0) begin
+                result <= bit_dest;
+                state  <= WRITEBACK_STATE;
+            end else begin
+                bit_dest[bit_pos] <= bit_temp[0];
+                bit_temp <= bit_temp >> 1;
+                bit_pos  <= bit_pos + 1;
+                bit_len  <= bit_len - 1;
+            end
+        end
+
+        2'd2: begin // ==================== BSFR ====================
+            if (bit_counter == 32) begin
+                result <= 32'd32;           // non trovato
+                // imposta flag Zero
+                state  <= WRITEBACK_STATE;
+            end
+            else if (bit_temp[bit_search_dir ? (31 - bit_counter) : bit_counter] == bit_search_type) begin
+                result <= bit_counter;
+                state  <= WRITEBACK_STATE;
+            end
+            else begin
+                bit_counter <= bit_counter + 1;
+            end
+        end
+    endcase
+end*/
+
+/*
+// Registri ausiliari
+reg [31:0] bit_src, bit_dest, bit_mask, bit_result;
+reg [5:0]  bit_pos, bit_len;
+reg [5:0]  bit_counter;
+reg        bit_sign_ext;
+reg        fill_enable;
+reg [1:0]  bit_op;   // 0=BXTR, 1=BINS, 2=BSFR
+
+// ====================== PREP ======================
+STATE_BITOP_PREP: begin
+    case (Opcode)
+        0x33: begin // BINS
+            bit_op       <= 1;
+            bit_src      <= res1.d;                    // valore da inserire
+            bit_dest     <= res2.d;                    // destinazione
+            bit_pos      <= LOBYTE(LOWORD(k)) & 5'h1F; // bs
+            bit_len      <= (HIBYTE(LOWORD(k)) == 0) ? 6'd32 : HIBYTE(LOWORD(k)) & 5'h1F;
+            bit_sign_ext <= HIWORD(k) & 16'h8000;
+            fill_enable  <= HIWORD(k) & 16'h4000;
+            bit_mask     <= 32'h00000001 << (LOBYTE(LOWORD(k)) & 5'h1F);
+        end
+
+        0x34: begin // BXTR
+            bit_op       <= 0;
+            bit_src      <= res1.d;
+            bit_pos      <= LOBYTE(LOWORD(k)) & 5'h1F;
+            bit_len      <= (HIBYTE(LOWORD(k)) == 0) ? 6'd32 : HIBYTE(LOWORD(k)) & 5'h1F;
+            bit_sign_ext <= HIWORD(k) & 16'h8000;
+            bit_result   <= 32'h0;
+            bit_mask     <= 32'h80000000 >> (LOBYTE(LOWORD(k)) & 5'h1F);  // per extract
+        end
+
+        0x35: begin // BSFR
+            bit_op      <= 2;
+            bit_src     <= res1.d;
+            bit_counter <= 0;
+        end
+    endcase
+    state <= STATE_BITOP_EXEC;
+end
+
+// ====================== EXEC (bit per bit) ======================
+STATE_BITOP_EXEC: begin
+    case (bit_op)
+        0: begin // BXTR
+            if (bit_len == 0) begin
+                result <= bit_result;
+                if (bit_sign_ext && bit_result[bit_len-1])   // da aggiustare
+                    result <= bit_result | ~((1 << original_len)-1);
+                state <= WRITEBACK;
+            end else begin
+                bit_result[bit_len-1] <= bit_src[bit_pos];
+                bit_pos  <= bit_pos + 1;
+                bit_len  <= bit_len - 1;
+            end
+        end
+
+        1: begin // BINS
+            if (bit_len == 0) begin
+                result <= bit_dest;
+                state  <= WRITEBACK;
+            end else begin
+                bit_dest[bit_pos] <= bit_src[0];
+                bit_src  <= bit_src >> 1;
+                bit_pos  <= bit_pos + 1;
+                bit_len  <= bit_len - 1;
+            end
+        end
+
+        2: begin // BSFR
+            if (bit_counter == 32) begin
+                result <= 32'd32;
+                state  <= WRITEBACK;
+            end else if (bit_src[ bit_search_dir ? (31-bit_counter) : bit_counter ] == bit_search_type) begin
+                result <= bit_counter;
+                state  <= WRITEBACK;
+            end else begin
+                bit_counter <= bit_counter + 1;
+            end
+        end
+    endcase
+end*/
+
+/*
+// Registri da aggiungere
+reg [31:0] bit_src;      // sorgente
+reg [31:0] bit_dest;     // destinazione (per BINS)
+reg [31:0] bit_result;
+reg [5:0]  bit_pos;
+reg [5:0]  bit_len;
+reg [5:0]  bit_counter;
+reg        bit_sign_ext;
+reg        bit_fill;        // per BINS "copri"
+reg [1:0]  bit_op;          // 0 = BXTR, 1 = BINS, 2 = BSFR
+reg        search_dir;
+reg        search_type;
+
+// ====================== STATE_BITOP_PREP ======================
+STATE_BITOP_PREP: begin
+    // k = control word (da registro o immediato successivo)
+    wire [31:0] k = 0 ; // logica per leggere k 
+
+    case (Opcode)
+        8'h33: begin // BINS
+            bit_op      <= 2'd1;
+            bit_src     <= res1.d;                          // valore da inserire
+            bit_dest    <= res2.d;                          // destinazione
+            bit_pos     <= k[7:0] & 6'h3F;                  // start position
+            bit_len     <= (k[15:8] == 0) ? 6'd32 : k[15:8] & 6'h3F;
+            bit_sign_ext<= k[31];
+            bit_fill    <= k[30];                           // "copri"
+        end
+
+        8'h34: begin // BXTR
+            bit_op      <= 2'd0;
+            bit_src     <= res1.d;
+            bit_pos     <= k[7:0] & 6'h3F;
+            bit_len     <= (k[15:8] == 0) ? 6'd32 : k[15:8] & 6'h3F;
+            bit_sign_ext<= k[31];
+            bit_result  <= 32'h0;
+        end
+
+        8'h35: begin // BSFR
+            bit_op       <= 2'd2;
+            bit_src      <= res1.d;
+            bit_counter  <= 6'd0;
+            search_dir   <= 0;  // bit dal formato 
+            search_type  <= 0;  // bit dal formato 
+        end
+    endcase
+
+    state <= STATE_BITOP_EXEC;
+end
+
+// ====================== STATE_BITOP_EXEC ======================
+STATE_BITOP_EXEC: begin
+    case (bit_op)
+        2'd0: begin // BXTR - Bit Extract
+            if (bit_len == 0) begin
+                result <= bit_result;
+                if (bit_sign_ext && bit_result[bit_len_orig-1])
+                    result <= bit_result | ~((1 << bit_len_orig) - 1);
+                state <= WRITEBACK;
+            end else begin
+                bit_result[bit_len-1] <= bit_src[bit_pos];
+                bit_pos <= bit_pos + 1;
+                bit_len <= bit_len - 1;
+            end
+        end
+
+        2'd1: begin // BINS - Bit Insert
+            if (bit_len == 0) begin
+                result <= bit_dest;
+                state  <= WRITEBACK;
+            end else begin
+                bit_dest[bit_pos] <= bit_src[0];
+                bit_src  <= bit_src >> 1;
+                bit_pos  <= bit_pos + 1;
+                bit_len  <= bit_len - 1;
+            end
+        end
+
+        2'd2: begin // BSFR - Bit Search
+            if (bit_counter == 32) begin
+                result <= 32'd32;           // non trovato
+                state  <= WRITEBACK;
+            end else if (bit_src[ search_dir ? (31-bit_counter) : bit_counter ] == search_type) begin
+                result <= bit_counter;
+                state  <= WRITEBACK;
+            end else begin
+                bit_counter <= bit_counter + 1;
+            end
+        end
+    endcase
+end*/
 
             OP_STST:
 							result[31:0] <= flags[31:0];
@@ -1658,12 +1897,14 @@ always @(posedge clk) begin
 								if (!instruction[24]) begin		// LEA
 								end
 								else begin		 // PEA
+									size_imm <= 4;
 			            state <= STATE_PUSH_0;
 								end
 							end
 
             OP_ENTER:
 							begin
+								size_imm <= 4;
 								result[31:0] <= regs[Rd][31:0];
 								if (MAX_ADDRESS_SIZE)
 									;
@@ -1685,6 +1926,7 @@ always @(posedge clk) begin
 								else begin
 									usp <= regs[Rd];
 								end
+								size_imm <= 4;
 		            state <= STATE_POP_0;
 							end
             OP_CHK:
@@ -1724,13 +1966,34 @@ always @(posedge clk) begin
 
             OP_LDM:
 							begin
-								reg_mask[31:0] <= source[31:0];
-		            state <= STATE_LDM_0;		// finire!
+								if (Td == MODE_IMMEDIATE8) begin
+			            state <= STATE_LDM_0;
+								end
+								else begin
+								  mem_address <= regs[31];
+				          mem_bus_enable <= 1;
+								  regs[31] <= regs[31] + 4;
+			            state <= STATE_LDM_STM;
+								end
+								reg_mask[31:0] <= 32'h00000001;
+								reg_count <= 0;
 							end
+			// (andrebbe invertita la bitmask tra LDM e STM?? come 68000...
             OP_STM:
 							begin
-								reg_mask[31:0] <= source[31:0];
-		            state <= STATE_STM_0;	// finire!
+								if (Td == MODE_IMMEDIATE8) begin
+									reg_mask[31:0] <= 32'h00000080;
+									reg_count <= 5'd7;
+			            state <= STATE_STM_0;
+								end
+								else begin
+									reg_mask[31:0] <= 32'h80000000;
+									reg_count <= 5'd31;
+								  mem_address <= regs[31];
+				          mem_bus_enable <= 1;
+								  regs[31] <= regs[31] + 4;
+			            state <= STATE_LDM_STM;
+								end
 							end
 				
 						`ifdef USA_DSP
@@ -1860,24 +2123,11 @@ always @(posedge clk) begin
 
             OP_IN,OP_INS:
 							begin
-								io_bus_enable <= 1;
-								case (size_m)
-									SIZE_8: result[7:0] <= io_read[7:0];
-									SIZE_16: result[11:0] <= io_read[7:0];		// boh, vedere se..
-									SIZE_32: result[31:0] <= io_read[7:0];
-								endcase
 							in_repeat <= Opcode[0];
 	            state <= STATE_READ_IO_0;
 							end
             OP_OUT,OP_OUTS:
 							begin
-								io_bus_enable <= 1;
-								io_write_enable <= 1;
-								case (size_m)
-									SIZE_8: io_write[7:0] <= source[7:0];
-									SIZE_16: io_write[7:0] <= source[7:0];		// boh idem
-									SIZE_32: io_write[7:0] <= source[7:0];
-								endcase
 							in_repeat <= Opcode[0];
 	            state <= STATE_WRITE_IO_0;
 							end
@@ -1982,12 +2232,12 @@ always @(posedge clk) begin
 							begin
 								reg [5:0] new_count;
 
-								new_count = (Rs[4]) ? RotateCnt : regs[Rs[3:0]][5:0];		// qua, su local, = non dà problemi
+								new_count = (Rs[4]) ? RotateCnt : regs[Rs[3:0]][5:0];		// qua, su local, = non dï¿½ problemi
     						if (new_count == 0)
 									new_count = 6'd63;
 								rotate_count <= new_count;    // gestire 64bit!!?
 								state <= STATE_EXECUTE_3_1;
-								// si può usare un ciclo for?? grok sconsiglia, ed è prevedibile
+								// si puï¿½ usare un ciclo for?? grok sconsiglia, ed ï¿½ prevedibile
 							end
 						OP_DJNZ:
 							begin
@@ -2140,7 +2390,113 @@ end
           endcase
         end
 
+			STATE_EXECUTE_4_0:			// altra execute per bit operations
+        begin
+					if (Reg3 == 0) begin
+	          mem_bus_enable <= 0;
+            bbb_type  <= mem_read[31:0];
+					end
+				state <= STATE_EXECUTE_4_1;
+				end
+
+			STATE_EXECUTE_4_1:
+        begin
+					case (Opcode)
+						OP_BINS: 
+							begin // BINS
+								bit_src     <= source;                          // valore da inserire
+								bit_dest    <= temp;                          // destinazione
+								bit_pos     <= bbb_type[7:0] & 6'h3F;                  // start position
+								bit_len     <= (bbb_type[15:8] == 0) ? 6'd32 : bbb_type[15:8] & 6'h3F;
+								bit_sign_ext<= bbb_type[31];
+								bit_fill    <= bbb_type[30];                           // "copri"
+							end
+
+						OP_BXTR: 
+							begin // BXTR
+								bit_src     <= source;
+								bit_pos     <= bbb_type[7:0] & 6'h3F;
+								bit_len     <= (bbb_type[15:8] == 0) ? 6'd32 : bbb_type[15:8] & 6'h3F;
+								bit_sign_ext<= bbb_type[31];
+								bit_result  <= 32'h0;
+							end
+
+						OP_BSFR: 
+							begin // BSFR  si potrebbe cercare stringa e non solo 1 bit...
+								bit_src      <= source;
+								bit_counter  <= 6'd0;
+								search_dir   <= 0 ;  // bit dal formato
+								search_type  <= 0;  // bit dal formato
+							end
+					endcase
+
+					state <= STATE_EXECUTE_4_2;
+        end
 		  
+			STATE_EXECUTE_4_2:
+        begin
+					case (Opcode)
+						OP_BXTR: 
+							begin 
+								if (bit_len == 0) begin
+									result <= bit_result;
+									if (bit_sign_ext && bit_result[bit_len_orig-1])
+										result <= bit_result | ~((1 << bit_len_orig) - 1);
+									state  <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+								end else begin
+									bit_result[bit_len-1] <= bit_src[bit_pos];
+									bit_pos <= bit_pos + 1;
+									bit_len <= bit_len - 1;
+								end
+							end
+
+						OP_BINS: 
+							begin 
+								if (bit_len == 0) begin
+									result <= bit_dest;
+									state  <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+								end else begin
+									bit_dest[bit_pos] <= bit_src[0];
+									bit_src  <= bit_src >> 1;
+									bit_pos  <= bit_pos + 1;
+									bit_len  <= bit_len - 1;
+								end
+							end
+
+						OP_BSFR:
+							begin 
+								if (bit_counter == 32) begin
+									result <= 32'd32;           // non trovato
+									state  <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+								end else if (bit_src[ search_dir ? (31-bit_counter) : bit_counter ] == search_type) begin
+									result <= bit_counter;
+									state  <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+								end else begin
+									bit_counter <= bit_counter + 1;
+								end
+							end
+					endcase
+        end
+
+		  STATE_EXECUTE_5:		// per XLAT
+				begin
+          mem_bus_enable <= 0;
+          case (size_m)
+            SIZE_8: result[7:0]   <= mem_read[7:0];
+            SIZE_16: result[15:0]  <= mem_read[15:0];
+            SIZE_32: result[31:0]  <= mem_read[31:0];
+            SIZE_64: begin  
+							if (MAX_OPERAND_SIZE==64) begin
+								result[31:0]  <= mem_read[31:0];	 	// FINIRE! gestire 64 con immediate_count=8 
+							end
+							else
+								;
+							end
+          endcase
+					state  <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+        end
+
+
       STATE_WRITEBACK_R:		// 23
         begin
 					if(wb) begin
@@ -2283,7 +2639,6 @@ end
 		  
       STATE_SET_FLAGS_0:
         begin
-					
 					case (size_m)
 						SIZE_8:
 							begin
@@ -2292,7 +2647,7 @@ end
 								flags[FLAG_S] <= result[7];
 								if(affects_ov) flags[FLAG_OV] <= temp[7] == (source[7] ^ is_sub) && result[7] != temp[7];
 								flags[FLAG_P] <= parity_gen(temp[7:0]);
-								flags[FLAG_HC] <= result[4];
+								flags[FLAG_HC] <= result[4];		// se _ROT va a 0!
 							end
 						SIZE_16:
 							begin
@@ -2324,7 +2679,14 @@ end
 							end
 					endcase
 
+					if (Opcode == OP_ADD || Opcode == OP_ADC || Opcode == OP_SBO || Opcode == OP_SBZ || Opcode == OP_TB)
+						flags[FLAG_AS] <= 0;
+					else if (Opcode == OP_SUB || Opcode == OP_SBC)
+						flags[FLAG_AS] <= 1;
+
 					if (in_repeat) begin
+						flags[FLAG_AS] <= 0;
+						flags[FLAG_D] <= (Td == MODE_INDIRECT_PREINC || Td == MODE_INDIRECT_POSTINC) ? 0 : 1;
 						regs[Reg3] <= regs[Reg3] - 1;
 						state <= regs[Reg3] ? STATE_DECODE : STATE_FETCH_OP_0;
 					end
@@ -2334,23 +2696,38 @@ end
 		  
 			STATE_READ_IO_0:
         begin
-					io_bus_enable <= 0;
-					state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
+					io_bus_enable <= 1;
+					state <= STATE_READ_IO_1;
         end
 
 			STATE_READ_IO_1:
         begin
+					case (size_m)
+						SIZE_8: result[7:0] <= io_read[7:0];
+						SIZE_16: result[15:0] <= io_read[7:0];		// boh, vedere se..
+						SIZE_32: result[31:0] <= io_read[7:0];
+					endcase
+					io_bus_enable <= 0;
+					state <= (Td == MODE_REGISTER) ? STATE_WRITEBACK_R : STATE_WRITEBACK_MEM_P;
         end
 
 			STATE_WRITE_IO_0:
         begin
-					io_write_enable <= 0;
-					io_bus_enable <= 0;
-					state <= STATE_FETCH_OP_0;
+					io_bus_enable <= 1;
+					io_write_enable <= 1;
+					case (size_m)
+						SIZE_8: io_write[7:0] <= source[7:0];
+						SIZE_16: io_write[7:0] <= source[7:0];		// boh idem
+						SIZE_32: io_write[7:0] <= source[7:0];
+					endcase
+					state <= STATE_WRITE_IO_1;
         end
 
 			STATE_WRITE_IO_1:
         begin
+					io_write_enable <= 0;
+					io_bus_enable <= 0;
+					state <= STATE_FETCH_OP_0;
         end
 
       STATE_PUSH_0:
@@ -2491,37 +2868,111 @@ end
           else
             state <= STATE_RTI_0;
         end
-		  
+
+			STATE_LDM_STM:
+				begin
+          mem_bus_enable <= 0;
+          temp[31:0] <= mem_read[31:0];
+		      state <= Opcode == OP_LDM ? STATE_LDM_0 : STATE_STM_0;
+        end
+// (andrebbe invertita la bitmask tra LDM e STM?? come 68000... predecrement ossia save in stack parte da MSB=R31 e postincrement da LSB
+
 			STATE_LDM_0:
 				begin
-//reg_mask
-//fare!					
-            state <= STATE_LDM_1;
+          mem_address <= ea_indirectS;
+          mem_bus_enable <= 1;
+					if (!reg_mask)
+	          state <= STATE_FETCH_OP_0;
+					else if (temp & reg_mask)
+	          state <= STATE_LDM_1;
+					if (Td == MODE_IMMEDIATE8) begin
+						reg_mask[7:0] <= (reg_mask[7:0] << 1);
+						end
+					else begin
+						reg_mask[31:0] <= reg_mask[31:0] << 1;
+					end
+					reg_count <= reg_count + 5'd1;
 				end
 
 			STATE_LDM_1:
 				begin
-//reg_mask
+          mem_bus_enable <= 0;
 
-//fare!					
-            state <= STATE_FETCH_OP_0;
+					regs[reg_count] <= mem_read;
+					case (size_m)
+						SIZE_8:
+							begin
+		          ea_indirectS <= ea_indirectS + 1;
+							end
+						SIZE_16:
+							begin
+		          ea_indirectS <= ea_indirectS + 2;
+							end
+						SIZE_32:
+							begin
+		          ea_indirectS <= ea_indirectS + 4;
+							end
+						SIZE_64:
+							begin
+		          ea_indirectS <= ea_indirectS + 8;
+							end
+					endcase
+
+					if(reg_mask)
+						state <= STATE_LDM_0;
+					else
+	          state <= STATE_FETCH_OP_0;
 				end
 
 			STATE_STM_0:
 				begin
 //reg_mask
+          mem_bus_enable <= 1;
+          mem_write_enable <= 1;
+          mem_address <= ea_indirectD;
 
-//fare!					
-            state <= STATE_STM_1;
+					if (source & reg_mask) begin
+						mem_write <= regs[reg_count];
+						case (size_m)
+							SIZE_8:
+								begin
+								ea_indirectD <= ea_indirectD + 1;
+								end
+							SIZE_16:
+								begin
+								ea_indirectD <= ea_indirectD + 2;
+								end
+							SIZE_32:
+								begin
+								ea_indirectD <= ea_indirectD + 4;
+								end
+							SIZE_64:
+								begin
+								ea_indirectD <= ea_indirectD + 8;
+								end
+						endcase
+						end
+
+					if (!reg_mask)
+	          state <= STATE_FETCH_OP_0;
+					else if (temp & reg_mask)
+	          state <= STATE_STM_1;
+					reg_mask[31:0] <= reg_mask[31:0] >> 1;
+					reg_count <= reg_count - 5'd1;
+
 				end
 
 			STATE_STM_1:
 				begin
-//reg_mask
+          mem_write_enable <= 0;
+          mem_bus_enable <= 0;
 
-//fare!					
+					if(reg_mask)
+						state <= STATE_STM_0;
+					else
             state <= STATE_FETCH_OP_0;
 				end
+
 
 			STATE_STEX_0:
 				begin
@@ -2563,9 +3014,13 @@ end
             state <= STATE_FETCH_OP_0;
 					else
             state <= STATE_FETCH_OP_0;
+					flags[FLAG_HC] <= 0;
+					flags[FLAG_AS] <= 0;
+					flags[FLAG_D] <= 0;
 				end
 `endif
 	  
+
       STATE_ERROR:
         begin
           state <= STATE_ERROR;
