@@ -7,3 +7,11 @@ parameter SIZE_64 = 2'd3;
 parameter MAX_OPERAND_SIZE = 32;
 parameter MAX_ADDRESS_SIZE = 32;
 
+parameter REGISTER_PC = 5'd31;
+parameter REGISTER_LINK = 5'd30;
+parameter REGISTER_WP = 5'd29;
+
+
+`define USA_DSP 1
+`define ALIGNMENT_CHECK     1     // 1 = abilita controllo allineamento
+

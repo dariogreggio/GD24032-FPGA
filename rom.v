@@ -6,12 +6,17 @@
 // This creates 8192*4 bytes of ROM on the FPGA itself which begins at 0x00000000.
 
 module rom(
-  input [12:0] address,
-  output reg [31:0] data_out,
+  input [15:0] address,
+  input  [1:0] size,
+  input  wire  force_32bit,   // nuovo: forza lettura a 32 bit (per fetch)
+  output wire address_error,
+	output reg [31:0] data_out,
   input clk
 );
 
-reg [31:0] memory [8191:0];
+`include "reg_mode.vinc"
+
+(* preserve *) reg [31:0] memory[8191:0];
 //reg [31:0] i;
 
 initial begin
@@ -25,8 +30,21 @@ initial begin
 end
 
 always @(posedge clk) begin
-  data_out <= memory[address[12:2]];		// cfr https://github.com/Varunkumar0610/RISC-V-Single-Cycle-Core/blob/main/src/Instruction_Memory.v
+	if (force_32bit) begin
+		data_out <= memory[address[12:2]];                    // sempre 32 bit
+	end else begin
+		case (size)
+			SIZE_8:  data_out <= {24'b0, memory[address[12:2]][address[1:0]*8 +:8]};
+			SIZE_16: data_out <= {16'b0, memory[address[12:2]][address[1]*16 +:16]};
+			default: data_out <= memory[address[12:2]];       // SIZE_32
+		endcase
+  end
+	
+	if (address[15:13]) begin
+	//	address_error <= 1;
+	end
+	
 end 
-
+	
 endmodule
 
